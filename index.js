@@ -5,24 +5,24 @@ const { WOLF } = wolfjs;
 const settings = {
     identity: process.env.U_MAIL || 'your_email@example.com',
     secret: process.env.U_PASS || 'your_password',
-    targetGroupId: 224, 
+    targetGroupId: 9969, 
     minuteInterval: 62 * 1000,
-    boxInterval: 20 * 60 * 1000
+    boxInterval: 3 * 60 * 1000
 };
 
 const MY_INFO = {
-    keyword: "فزآعنا",  // الكلمة لتيتميز حسابك عن الحسابات الأخرى
-    ownerId: "2481425"  // إجابة سؤال العضوية
+    keyword: "فزآعنا",  // الكلمة الأساسية للتعرف عليك
+    ownerId: "2481425"  // إجابة سؤال عضوية المالك
 };
 
 const service = new WOLF();
 
-// --- 1. الأوامر التلقائية ---
-const sendAutoCommands = async (cmd) => {
-    try { await service.messaging.sendGroupMessage(settings.targetGroupId, cmd); } catch (e) {}
+// مصفوفة تحويل الأرقام إلى كلمات لحل سؤال "اكتب الرقم بالكلمات"
+const numToWordMap = {
+    '0': 'صفر', '1': 'واحد', '2': 'اثنان', '3': 'ثلاثة', '4': 'أربعة', 
+    '5': 'خمسة', '6': 'ستة', '7': 'سبعة', '8': 'ثمانية', '9': 'تسعة', '10': 'عشرة'
 };
 
-// --- 2. المحرك الذكي لحل الفخاخ ---
 service.on('groupMessage', async (message) => {
     try {
         if (message.targetGroupId !== settings.targetGroupId || message.subscriberId === service.currentSubscriber.id) return;
@@ -30,24 +30,32 @@ service.on('groupMessage', async (message) => {
         const content = message.body;
         if (!content.includes("لأنك لاعب مجتهد جدًا اليوم")) return;
 
-        // التحقق أن الفخ موجه لـ "فزآعنا" حصراً
+        // الفلترة: الرد فقط إذا وجدت كلمة "فزآعنا"
+        // سيتم تجاهل حساب (🐈‍⬛🌟) تلقائياً لأنه لا يحتوي على هذا النص
         if (!content.includes(MY_INFO.keyword)) {
-            console.log("⏭️ تم تجاهل فخ للاعب آخر.");
+            console.log("⏭️ تم تجاهل فخ لحساب آخر.");
             return;
         }
 
-        console.log("🎯 فخ موجه لك، جاري استخراج الإجابة...");
+        console.log(`🎯 تم رصد فخ لـ (${MY_INFO.keyword})، جاري التحليل...`);
         let answer = null;
 
-        // أ) سؤال عضوية المالك (حل مشكلة الصورة 1000144184)
-        if (content.includes('عضوية مالك البوت') || content.includes('عضوية صاحب البوت')) {
+        // 1. حل سؤال الرقم بالكلمات (مثل: اكتب الرقم 9 بالكلمات)
+        if (content.includes('بالكلمات') || content.includes('اكتب الرقم')) {
+            const match = content.match(/\d+/);
+            if (match && numToWordMap[match[0]]) {
+                answer = numToWordMap[match[0]];
+            }
+        }
+        // 2. حل سؤال عضوية المالك
+        else if (content.includes('عضوية')) {
             answer = MY_INFO.ownerId;
         }
-        // ب) أسئلة صح أم خطأ (التحالف، الصناديق)
-        else if (content.includes('صح أم خطأ') || content.includes('صح أو خطأ') || content.includes('التحالف') || content.includes('الصناديق')) {
+        // 3. حل أسئلة صح أم خطأ (التحالف/الصناديق)
+        else if (content.includes('صح أم خطأ') || content.includes('صح أو خطأ')) {
             answer = "صح";
         }
-        // ج) المقارنة (أكبر / أصغر)
+        // 4. حل أسئلة المقارنة (أيهما أكبر/أصغر)
         else if (content.includes('أيهما') || content.includes('ايهما')) {
             const nums = content.match(/\d+/g);
             if (nums && nums.length >= 2) {
@@ -55,48 +63,31 @@ service.on('groupMessage', async (message) => {
                 answer = (content.includes('أكبر') || content.includes('اكبر')) ? Math.max(n1, n2) : Math.min(n1, n2);
             }
         }
-        // د) العمليات الحسابية (فقط إذا وجد "ناتج" أو علامة حسابية)
-        else if (content.includes('ناتج') || content.includes('+') || content.includes('-')) {
-            const nums = content.match(/\d+/g);
-            if (nums && nums.length >= 2) {
-                const n1 = parseInt(nums[0]), n2 = parseInt(nums[1]);
-                answer = (content.includes('-') || content.includes('طرح') || content.includes('ناقص')) ? n1 - n2 : n1 + n2;
-            }
-        }
-        // هـ) اكتب الكلمة كما هي
-        else if (content.includes('اكتب كلمة') || content.includes('كما هي')) {
-            const match = content.match(/:\s*(\S+)/) || content.match(/هي\s+(\S+)/);
-            if (match) answer = match[1];
-        }
 
-        // إرسال الرد بعد 5 ثوانٍ فقط في حال وجود إجابة محققة
+        // إرسال الرد بعد 5 ثوانٍ لضمان القبول
         if (answer !== null) {
             const finalResponse = `!${answer}`;
             setTimeout(async () => {
                 await service.messaging.sendGroupMessage(settings.targetGroupId, finalResponse);
-                console.log(`✅ تم الرد بـ: ${finalResponse}`);
-            }, 5000);
-        } else {
-            console.log("⚠️ لم يتم تحديد إجابة دقيقة، تم إلغاء الرد التلقائي لتجنب الخطأ.");
+                console.log(`✅ تم الرد بنجاح بـ: ${finalResponse}`);
+            }, 5000); 
         }
     } catch (err) {}
 });
 
-// --- 3. التشغيل والجدولة ---
 service.on('ready', async () => {
-    console.log(`✅ البوت متصل ومراقب لـ: ${MY_INFO.keyword}`);
+    console.log(`✅ البوت يعمل الآن ويراقب حساب: ${MY_INFO.keyword}`);
     try {
         await service.group.joinById(settings.targetGroupId);
         
-        // جدولة المهام والإيداع (كل دقيقة)
+        // جدولة المهام والإيداع كل دقيقة
         setInterval(() => {
-            sendAutoCommands("!مد مهام");
-            setTimeout(() => sendAutoCommands("!مد تحالف ايداع كل"), 3000);
+            service.messaging.sendGroupMessage(settings.targetGroupId, "!مد مهام");
+            setTimeout(() => service.messaging.sendGroupMessage(settings.targetGroupId, "!مد تحالف ايداع كل"), 3000);
         }, settings.minuteInterval);
 
-        // جدولة فتح الصناديق (كل 3 دقائق)
-        setInterval(() => sendAutoCommands("!مد صندوق فتح"), settings.boxInterval);
-        
+        // جدولة فتح الصناديق كل 3 دقائق
+        setInterval(() => service.messaging.sendGroupMessage(settings.targetGroupId, "!مد صندوق فتح"), settings.boxInterval);
     } catch (e) {}
 });
 
