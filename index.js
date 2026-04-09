@@ -7,7 +7,7 @@ const settings = {
     secret: process.env.U_PASS || 'your_password',
     targetGroupId: 7800 , 
     minuteInterval: 62 * 1000,
-    boxInterval: 9 * 60 * 1000
+    boxInterval: 1109 * 60 * 1000
 };
 
 const MY_INFO = {
