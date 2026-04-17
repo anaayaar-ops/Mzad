@@ -73,7 +73,7 @@ service.on('groupMessage', async (message) => {
             // أ. التحقق المقيد بـ 5 ثوانٍ (لضمان أنه لك)
             if (isSafetyAlert) {
                 const now = Date.now();
-                if ((now - lastRoutineCommandTime <= 5000) || (now - lastBoxCommandTime <= 5000)) {
+                if ((now - lastRoutineCommandTime <= 1000) || (now - lastBoxCommandTime <= 1000)) {
                     await service.messaging.sendGroupMessage(message.targetGroupId, "!مد فحص");
                 }
                 return;
