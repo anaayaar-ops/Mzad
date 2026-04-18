@@ -14,7 +14,7 @@ const settings = {
 const MY_INFO = {
     keyword: "فزآعنا",
     ownerId: "2481425",
-    monitorId: 76023180 
+    monitorId:  76023180
 };
 
 let canOpenBoxes = true;
@@ -27,12 +27,12 @@ const wordToNum = {'صفر':'0','واحد':'1','اثنان':'2','ثلاثة':'3'
 
 const service = new WOLF();
 
-// --- نظام مراقبة الهجوم (تم تصحيح القوس هنا) ---
+// --- نظام مراقبة الهجوم (إصلاح القوس والمراقبة) ---
 service.on('message', async (message) => {
     try {
         if (!message.isGroup && (message.sourceSubscriberId === MY_INFO.monitorId || message.authorId === MY_INFO.monitorId)) {
             const content = message.body || "";
-            // تم إضافة قوس الإغلاق الناقص هنا )
+            // مراقبة جملة الهجوم كما تظهر في سجلاتك
             if (content.includes("تعرضتم لهجوم من") || content.includes("هجوم ناجح على")) {
                 await runEmergencyProtocol();
             }
@@ -40,7 +40,6 @@ service.on('message', async (message) => {
     } catch (err) {}
 });
 
-// بروتوكول الطوارئ
 const runEmergencyProtocol = async () => {
     isPaused = true;
     console.log("🚨 [طوارئ] تم رصد هجوم! تنفيذ الأوامر المتتالية...");
@@ -52,7 +51,7 @@ const runEmergencyProtocol = async () => {
         "!مد تحالف سلاح شراء 5",
         "!مد تفعيل 5",
         "!مد تحالف سلاح شراء 4",
-        "!مد تفعيل 4"
+        "!مد تفعيل 6" 
     ];
     for (const cmd of commands) {
         try {
@@ -85,10 +84,10 @@ service.on('groupMessage', async (message) => {
 
         const content = message.body;
 
-        // --- نظام إيقاف الصناديق النهائي ---
-        if (content.includes("لا تملك مفاتيح!") && content.includes(MY_INFO.keyword)) {
+        // --- إصلاح التوقف: حذف شرط وجود الاسم لأن المدينة ترسلها بدون اسم ---
+        if (content.includes("لا تملك مفاتيح!")) {
             canOpenBoxes = false; 
-            console.log("🚫 [توقف نهائي] تم إيقاف الصناديق لنفاذ المفاتيح.");
+            console.log("🚫 [توقف نهائي] تم إيقاف الصناديق لنفاذ المفاتيح كما ظهر في الصورة.");
             return;
         }
 
@@ -103,30 +102,24 @@ service.on('groupMessage', async (message) => {
             return;
         }
 
-        // --- محرك حل الفخاخ الشامل ---
+        // --- نظام حل الفخاخ (تم تغيير الصيغة إلى ! بناءً على الصورة) ---
         const isTrap = (content.includes("لاعب مجتهد") || content.includes("سؤال التحقق")) && content.includes(MY_INFO.keyword);
         
         if (isTrap) {
             let answer = null;
-
             if (content.includes('عضوية')) answer = MY_INFO.ownerId;
-            
             else if (content.includes('بالكلمات') || content.includes('بالحروف')) {
                 const match = content.match(/\d+/);
                 if (match && numToWord[match[0]]) answer = numToWord[match[0]];
             } 
             else if (content.includes('بالأرقام') || content.includes('بالارقام')) {
-                for (let word in wordToNum) {
-                    if (content.includes(word)) { answer = wordToNum[word]; break; }
-                }
+                for (let word in wordToNum) { if (content.includes(word)) { answer = wordToNum[word]; break; } }
             } 
             else if (content.includes('اكتب') && (content.includes('كما هي') || content.includes('كلمة'))) {
                 const match = content.match(/:\s*(\S+)/) || content.match(/هي\s+(\S+)/);
                 if (match) answer = match[1];
             } 
-            else if (content.includes('صح أم خطأ') || content.includes('التحالف')) {
-                answer = "صح";
-            } 
+            else if (content.includes('صح أم خطأ') || content.includes('التحالف')) answer = "صح";
             else if (content.includes('أيهما') || content.includes('ايهما')) {
                 const nums = content.match(/\d+/g);
                 if (nums && nums.length >= 2) {
@@ -134,7 +127,7 @@ service.on('groupMessage', async (message) => {
                     answer = (content.includes('أكبر') || content.includes('اكبر')) ? Math.max(n1, n2) : Math.min(n1, n2);
                 }
             } 
-            else if (content.includes('ناتج') || content.includes('+') || content.includes('-') || content.includes('طرح') || content.includes('جمع')) {
+            else if (content.includes('ناتج') || content.includes('+') || content.includes('-')) {
                 const nums = content.match(/\d+/g);
                 if (nums && nums.length >= 2) {
                     const n1 = parseInt(nums[0]), n2 = parseInt(nums[1]);
@@ -144,6 +137,7 @@ service.on('groupMessage', async (message) => {
 
             if (answer !== null) {
                 setTimeout(async () => {
+                    // التعديل: استخدام ! بدلاً من # بناءً على تعليمات المدينة في الصورة
                     await service.messaging.sendGroupMessage(message.targetGroupId, `#${answer}`);
                     setTimeout(() => sendRoutineCommands(), 2000);
                 }, 5000);
