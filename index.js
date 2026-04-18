@@ -6,7 +6,7 @@ const settings = {
     identity: process.env.U_MAIL,
     secret: process.env.U_PASS,
     taskGroupId: 9969,
-    depositGroupId: 224,
+    depositGroupId: 9969,
     minuteInterval: 303 * 1000,
     boxInterval: 3 * 60 * 1000
 };
