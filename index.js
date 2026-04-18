@@ -5,7 +5,7 @@ const { WOLF } = wolfjs;
 const settings = {
     identity: process.env.U_MAIL,
     secret: process.env.U_PASS,
-    taskGroupId: 224,
+    taskGroupId: 9969,
     depositGroupId: 224,
     minuteInterval: 303 * 1000,
     boxInterval: 3 * 60 * 1000
@@ -14,7 +14,7 @@ const settings = {
 const MY_INFO = {
     keyword: "فزآعنا",
     ownerId: "2481425",
-    monitorId: 80055399 // العضوية المراقبة للهجوم
+    monitorId: 80055399 
 };
 
 let canOpenBoxes = true;
@@ -27,11 +27,22 @@ const wordToNum = {'صفر':'0','واحد':'1','اثنان':'2','ثلاثة':'3'
 
 const service = new WOLF();
 
-// دالة بروتوكول الطوارئ (تنفيذ الأوامر ورا بعض)
+// --- نظام مراقبة الهجوم (مؤكد 100%) ---
+service.on('message', async (message) => {
+    try {
+        if (!message.isGroup && (message.sourceSubscriberId === MY_INFO.monitorId || message.authorId === MY_INFO.monitorId)) {
+            const content = message.body || "";
+            if (content.includes("تعرضتم لهجوم من") {
+                await runEmergencyProtocol();
+            }
+        }
+    } catch (err) {}
+});
+
+// بروتوكول الطوارئ
 const runEmergencyProtocol = async () => {
     isPaused = true;
-    console.log("🚨 [طوارئ] تم رصد هجوم ناجح! بدء الحماية في روم 224...");
-
+    console.log("🚨 [طوارئ] تم رصد هجوم! تنفيذ الأوامر المتتالية...");
     const commands = [
         "!مد تحالف سحب كل",
         "!مد تحالف مغادرة",
@@ -42,14 +53,12 @@ const runEmergencyProtocol = async () => {
         "!مد تحالف سلاح شراء 4",
         "!مد تفعيل 4"
     ];
-
     for (const cmd of commands) {
         try {
             await service.messaging.sendGroupMessage(settings.depositGroupId, cmd);
             await new Promise(r => setTimeout(r, 1500)); 
         } catch (e) {}
     }
-
     isPaused = false;
     sendRoutineCommands();
 };
@@ -68,44 +77,39 @@ const sendRoutineCommands = async () => {
     } catch (e) {}
 };
 
-// مراقبة الخاص بنظام الصيد (لحل مشكلة عدم الاستجابة للهجوم)
-service.on('message', async (message) => {
-    try {
-        if (!message.isGroup && (message.sourceSubscriberId === MY_INFO.monitorId || message.authorId === MY_INFO.monitorId)) {
-            const content = message.body || "";
-            if (content.includes("تعرضتم لهجوم من")) {
-                await runEmergencyProtocol();
-            }
-        }
-    } catch (err) {}
-});
-
-// معالجة رسائل المجموعات (الفخاخ والتحقق)
 service.on('groupMessage', async (message) => {
     try {
         const isTargetGroup = message.targetGroupId === settings.taskGroupId || message.targetGroupId === settings.depositGroupId;
-        if (!isTargetGroup || message.subscriberId === service.currentSubscriber.id) return;
+        if (!isTargetGroup) return;
 
         const content = message.body;
 
-        // 1. نظام التحقق (فحص) بحد 1 ثانية
+        // --- نظام إيقاف الصناديق النهائي (🗝️ لا تملك مفاتيح!) ---
+        if (content.includes("لا تملك مفاتيح!") && content.includes(MY_INFO.keyword)) {
+            canOpenBoxes = false; // سيتوقف للأبد حتى تعيد تشغيل الملف
+            console.log("🚫 [توقف نهائي] تم إيقاف الصناديق لنفاذ المفاتيح. يتطلب إعادة تشغيل البوت يدوياً.");
+            return;
+        }
+
+        if (message.subscriberId === service.currentSubscriber.id) return;
+
+        // نظام التحقق (فحص)
         if (content.includes("يوجد سؤال تحقق نشط")) {
             const now = Date.now();
-            if ((now - lastRoutineCommandTime <= 1000) || (now - lastBoxCommandTime <= 1000)) {
+            if ((now - lastRoutineCommandTime <= 2000) || (now - lastBoxCommandTime <= 2000)) {
                 await service.messaging.sendGroupMessage(message.targetGroupId, "!مد فحص");
             }
             return;
         }
 
-        // 2. محرك حل الفخاخ الشامل
-        const isTrap = (content.includes("لأنك لاعب مجتهد") || content.includes("سؤال التحقق")) && content.includes(MY_INFO.keyword);
+        // --- فحص وحل الفخاخ (تأكيد الشمولية) ---
+        const isTrap = (content.includes("لاعب مجتهد") || content.includes("سؤال التحقق")) && content.includes(MY_INFO.keyword);
         
         if (isTrap) {
             let answer = null;
 
-            if (content.includes('عضوية')) {
-                answer = MY_INFO.ownerId;
-            } 
+            if (content.includes('عضوية')) answer = MY_INFO.ownerId;
+            
             else if (content.includes('بالكلمات') || content.includes('بالحروف')) {
                 const match = content.match(/\d+/);
                 if (match && numToWord[match[0]]) answer = numToWord[match[0]];
@@ -116,10 +120,11 @@ service.on('groupMessage', async (message) => {
                 }
             } 
             else if (content.includes('اكتب') && (content.includes('كما هي') || content.includes('كلمة'))) {
+                // استخراج الكلمة بعد النقطتين أو بعد كلمة "هي"
                 const match = content.match(/:\s*(\S+)/) || content.match(/هي\s+(\S+)/);
                 if (match) answer = match[1];
             } 
-            else if (content.includes('صح أم خطأ') || content.includes('صح أو خطأ') || content.includes('التحالف') || content.includes('الصناديق')) {
+            else if (content.includes('صح أم خطأ') || content.includes('التحالف')) {
                 answer = "صح";
             } 
             else if (content.includes('أيهما') || content.includes('ايهما')) {
@@ -129,7 +134,7 @@ service.on('groupMessage', async (message) => {
                     answer = (content.includes('أكبر') || content.includes('اكبر')) ? Math.max(n1, n2) : Math.min(n1, n2);
                 }
             } 
-            else if (content.includes('ناتج') || content.includes('+') || content.includes('-') || content.includes('جمع') || content.includes('طرح')) {
+            else if (content.includes('ناتج') || content.includes('+') || content.includes('-') || content.includes('طرح') || content.includes('جمع')) {
                 const nums = content.match(/\d+/g);
                 if (nums && nums.length >= 2) {
                     const n1 = parseInt(nums[0]), n2 = parseInt(nums[1]);
@@ -139,7 +144,6 @@ service.on('groupMessage', async (message) => {
 
             if (answer !== null) {
                 setTimeout(async () => {
-                    // الرد بـ # قبل الإجابة كما في كودك
                     await service.messaging.sendGroupMessage(message.targetGroupId, `#${answer}`);
                     setTimeout(() => sendRoutineCommands(), 2000);
                 }, 5000);
@@ -149,12 +153,13 @@ service.on('groupMessage', async (message) => {
 });
 
 service.on('ready', () => {
-    console.log(`✅ فزآعنا متصل وجاهز. مراقبة الهجمات وفخاخ الذكاء نشطة.`);
+    console.log(`✅ فزآعنا متصل. مراقبة الهجوم (خاص) + إيقاف الصناديق اليدوي (نشط).`);
     try {
         service.group.joinById(settings.taskGroupId);
         service.group.joinById(settings.depositGroupId);
         sendRoutineCommands();
         setInterval(() => sendRoutineCommands(), settings.minuteInterval);
+        
         setInterval(() => {
             if (canOpenBoxes && !isPaused) {
                 lastBoxCommandTime = Date.now();
