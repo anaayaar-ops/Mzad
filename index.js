@@ -27,12 +27,13 @@ const wordToNum = {'صفر':'0','واحد':'1','اثنان':'2','ثلاثة':'3'
 
 const service = new WOLF();
 
-// --- نظام مراقبة الهجوم (مؤكد 100%) ---
+// --- نظام مراقبة الهجوم (تم تصحيح القوس هنا) ---
 service.on('message', async (message) => {
     try {
         if (!message.isGroup && (message.sourceSubscriberId === MY_INFO.monitorId || message.authorId === MY_INFO.monitorId)) {
             const content = message.body || "";
-            if (content.includes("تعرضتم لهجوم من") {
+            // تم إضافة قوس الإغلاق الناقص هنا )
+            if (content.includes("تعرضتم لهجوم من") || content.includes("هجوم ناجح على")) {
                 await runEmergencyProtocol();
             }
         }
@@ -84,10 +85,10 @@ service.on('groupMessage', async (message) => {
 
         const content = message.body;
 
-        // --- نظام إيقاف الصناديق النهائي (🗝️ لا تملك مفاتيح!) ---
+        // --- نظام إيقاف الصناديق النهائي ---
         if (content.includes("لا تملك مفاتيح!") && content.includes(MY_INFO.keyword)) {
-            canOpenBoxes = false; // سيتوقف للأبد حتى تعيد تشغيل الملف
-            console.log("🚫 [توقف نهائي] تم إيقاف الصناديق لنفاذ المفاتيح. يتطلب إعادة تشغيل البوت يدوياً.");
+            canOpenBoxes = false; 
+            console.log("🚫 [توقف نهائي] تم إيقاف الصناديق لنفاذ المفاتيح.");
             return;
         }
 
@@ -102,7 +103,7 @@ service.on('groupMessage', async (message) => {
             return;
         }
 
-        // --- فحص وحل الفخاخ (تأكيد الشمولية) ---
+        // --- محرك حل الفخاخ الشامل ---
         const isTrap = (content.includes("لاعب مجتهد") || content.includes("سؤال التحقق")) && content.includes(MY_INFO.keyword);
         
         if (isTrap) {
@@ -120,7 +121,6 @@ service.on('groupMessage', async (message) => {
                 }
             } 
             else if (content.includes('اكتب') && (content.includes('كما هي') || content.includes('كلمة'))) {
-                // استخراج الكلمة بعد النقطتين أو بعد كلمة "هي"
                 const match = content.match(/:\s*(\S+)/) || content.match(/هي\s+(\S+)/);
                 if (match) answer = match[1];
             } 
@@ -153,7 +153,7 @@ service.on('groupMessage', async (message) => {
 });
 
 service.on('ready', () => {
-    console.log(`✅ فزآعنا متصل. مراقبة الهجوم (خاص) + إيقاف الصناديق اليدوي (نشط).`);
+    console.log(`✅ فزآعنا متصل وجاهز.`);
     try {
         service.group.joinById(settings.taskGroupId);
         service.group.joinById(settings.depositGroupId);
