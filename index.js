@@ -146,7 +146,7 @@ service.on('ready', async () => {
         setInterval(() => {
             if (canOpenBoxes && !isPaused) {
                 lastBoxCommandTime = Date.now();
-                service.messaging.sendGroupMessage(settings.taskGroupId, "!مد صندوق فتح");
+                service.messaging.sendGroupMessage(settings.taskGroupId, "..");
             }
         }, settings.boxInterval);
     } catch (e) {}
