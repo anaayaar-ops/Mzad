@@ -11,6 +11,7 @@ const settings = {
     boxInterval: 3 * 60 * 1000
 };
 
+
 const MY_INFO = {
     keyword: "فزآعنا",  
     ownerId: "2481425"  
