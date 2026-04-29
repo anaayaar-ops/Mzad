@@ -5,15 +5,14 @@ const { WOLF } = wolfjs;
 const settings = {
     identity: process.env.U_MAIL || 'your_email@example.com',
     secret: process.env.U_PASS || 'your_password',
-    taskGroupId: 224 ,
+    taskGroupId: 17614046 ,
     depositGroupId: 224,
     minuteInterval: 63 * 1000,
     boxInterval: 30 * 60 * 1000
 };
 
-
 const MY_INFO = {
-    keyword: "فزآعنا",  
+    keywords: ["فزآعنا", "أوكسجينه"], // الأسماء المطلوبة
     ownerId: "2481425"  
 };
 
@@ -26,6 +25,9 @@ const numToWord = {'0':'صفر','1':'واحد','2':'اثنان','3':'ثلاثة'
 const wordToNum = {'صفر':'0','واحد':'1','اثنان':'2','ثلاثة':'3','أربعة':'4','خمسة':'5','ستة':'6','سبعة':'7','ثمانية':'8','تسعة':'9','عشرة':'10'};
 
 const service = new WOLF();
+
+// دالة مساعدة للتحقق من وجود أي من الأسماء في الرسالة
+const hasMyName = (text) => MY_INFO.keywords.some(name => text.includes(name));
 
 const sendRoutineCommands = async () => {
     if (isPaused) return;
@@ -47,10 +49,9 @@ service.on('groupMessage', async (message) => {
         if (!isTargetGroup) return;
 
         const content = message.body;
-        const isMe = message.subscriberId === service.currentSubscriber.id;
 
-        // 1. التوقف الإنتاجي
-        if (content.includes("تم إيقاف الأوامر الإنتاجية مؤقتًا") && content.includes(MY_INFO.keyword)) {
+        // 1. التوقف الإنتاجي - تم تعديل الشرط هنا
+        if (content.includes("تم إيقاف الأوامر الإنتاجية مؤقتًا") && hasMyName(content)) {
             const match = content.match(/\d+/); 
             if (match) {
                 isPaused = true;
@@ -65,13 +66,12 @@ service.on('groupMessage', async (message) => {
             return;
         }
 
-        // 3. نظام الأولوية الشامل لحل الفخاخ والتحقق
+        // 3. نظام الأولوية الشامل - تم تعديل الشرط هنا ليشمل الأسماء
         const isTrap = content.includes("لأنك لاعب مجتهد جدًا اليوم") || content.includes("سؤال التحقق الخاص بك هو");
         const isSafetyAlert = content.includes("يوجد سؤال تحقق نشط");
 
-        if ((isTrap && content.includes(MY_INFO.keyword)) || isSafetyAlert || (isTrap && content.includes("سؤال التحقق"))) {
+        if ((isTrap && hasMyName(content)) || isSafetyAlert || (isTrap && content.includes("سؤال التحقق"))) {
             
-            // أ. التحقق المقيد بـ 5 ثوانٍ (لضمان أنه لك)
             if (isSafetyAlert) {
                 const now = Date.now();
                 if ((now - lastRoutineCommandTime <= 1000) || (now - lastBoxCommandTime <= 1000)) {
@@ -81,34 +81,22 @@ service.on('groupMessage', async (message) => {
             }
 
             let answer = null;
-            // --- جميع طرق التحقق المستخلصة ---
 
-            // 1. عضوية المالك ( ownerId )
             if (content.includes('عضوية')) answer = MY_INFO.ownerId;
-
-            // 2. التحويل إلى كلمات (بالكلمات / بالحروف)
             else if (content.includes('بالكلمات') || content.includes('بالحروف')) {
                 const match = content.match(/\d+/);
                 if (match && numToWord[match[0]]) answer = numToWord[match[0]];
             }
-
-            // 3. التحويل إلى أرقام (بالأرقام)
             else if (content.includes('بالأرقام') || content.includes('بالارقام')) {
                 for (let word in wordToNum) { if (content.includes(word)) { answer = wordToNum[word]; break; } }
             }
-
-            // 4. كتابة الكلمة كما هي ( اكتب / كلمة / كما هي )
             else if (content.includes('اكتب') && (content.includes('كلمة') || content.includes('كما هي'))) {
                 const match = content.match(/:\s*(\S+)/) || content.match(/هي\s+(\S+)/);
                 if (match) answer = match[1];
             }
-
-            // 5. صح أم خطأ ( التحالف / الصناديق / صح أم خطأ )
             else if (content.includes('صح أم خطأ') || content.includes('صح أو خطأ') || content.includes('التحالف') || content.includes('الصناديق')) {
                 answer = "صح";
             }
-
-            // 6. المقارنة ( أيهما أكبر / أصغر )
             else if (content.includes('أيهما') || content.includes('ايهما')) {
                 const nums = content.match(/\d+/g);
                 if (nums && nums.length >= 2) {
@@ -116,8 +104,6 @@ service.on('groupMessage', async (message) => {
                     answer = (content.includes('أكبر') || content.includes('اكبر')) ? Math.max(n1, n2) : Math.min(n1, n2);
                 }
             }
-
-            // 7. العمليات الحسابية ( ناتج / + / - / طرح / جمع )
             else if (content.includes('ناتج') || content.includes('+') || content.includes('-') || content.includes('جمع') || content.includes('طرح')) {
                 const nums = content.match(/\d+/g);
                 if (nums && nums.length >= 2) {
@@ -126,7 +112,6 @@ service.on('groupMessage', async (message) => {
                 }
             }
 
-            // إرسال الإجابة بعد 5 ثوانٍ واستئناف الأوامر
             if (answer !== null) {
                 setTimeout(async () => {
                     await service.messaging.sendGroupMessage(message.targetGroupId, `#${answer}`);
@@ -138,7 +123,7 @@ service.on('groupMessage', async (message) => {
 });
 
 service.on('ready', async () => {
-    console.log(`🚀 البوت مكتمل: جميع طرق الحل مدمجة + حماية الفحص مفعلة.`);
+    console.log(`🚀 البوت جاهز ويراقب الأسماء: ${MY_INFO.keywords.join(', ')}`);
     try {
         await service.group.joinById(settings.taskGroupId);
         await service.group.joinById(settings.depositGroupId);
