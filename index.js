@@ -5,14 +5,14 @@ const { WOLF } = wolfjs;
 const settings = {
     identity: process.env.U_MAIL || 'your_email@example.com',
     secret: process.env.U_PASS || 'your_password',
-    taskGroupId: 9969,
-    depositGroupId: 66266,
+    taskGroupId: 224,
+    depositGroupId: 224,
     minuteInterval: 63 * 1000,
     boxInterval: 60 * 60 * 1000
 };
 
 const MY_INFO = {
-    keywords: ["فزآعنا", "أوكسجينه"], // الأسماء المطلوبة
+    keywords: ["فزآعنا", "أوكسجينه"], 
     ownerId: "2481425"  
 };
 
@@ -43,6 +43,20 @@ const sendRoutineCommands = async () => {
     } catch (e) {}
 };
 
+// --- [القسم الجديد: مراقبة الخاص] ---
+service.on('privateMessage', async (message) => {
+    try {
+        const TARGET_SENDER_ID = 80055399; 
+        const TRIGGER_COMMAND = "!مد صندوق ضمان وقت";
+
+        if (message.sourceSubscriberId === TARGET_SENDER_ID && message.body.trim() === TRIGGER_COMMAND) {
+            await service.messaging.sendGroupMessage(settings.taskGroupId, TRIGGER_COMMAND);
+            console.log(`[الخاص] تم تمرير أمر الضمان من ${TARGET_SENDER_ID}`);
+        }
+    } catch (err) {}
+});
+
+// --- [معالجة رسائل المجموعات] ---
 service.on('groupMessage', async (message) => {
     try {
         const isTargetGroup = message.targetGroupId === settings.taskGroupId || message.targetGroupId === settings.depositGroupId;
@@ -50,7 +64,7 @@ service.on('groupMessage', async (message) => {
 
         const content = message.body;
 
-        // 1. التوقف الإنتاجي - تم تعديل الشرط هنا
+        // 1. التوقف الإنتاجي
         if (content.includes("تم إيقاف الأوامر الإنتاجية مؤقتًا") && hasMyName(content)) {
             const match = content.match(/\d+/); 
             if (match) {
@@ -66,7 +80,7 @@ service.on('groupMessage', async (message) => {
             return;
         }
 
-        // 3. نظام الأولوية الشامل - تم تعديل الشرط هنا ليشمل الأسماء
+        // 3. نظام الأولوية وفك الفخاخ
         const isTrap = content.includes("لأنك لاعب مجتهد جدًا اليوم") || content.includes("سؤال التحقق الخاص بك هو");
         const isSafetyAlert = content.includes("يوجد سؤال تحقق نشط");
 
@@ -124,6 +138,7 @@ service.on('groupMessage', async (message) => {
 
 service.on('ready', async () => {
     console.log(`🚀 البوت جاهز ويراقب الأسماء: ${MY_INFO.keywords.join(', ')}`);
+    console.log(`📡 مراقبة الخاص للعضوية: 80055399 مفعلة`);
     try {
         await service.group.joinById(settings.taskGroupId);
         await service.group.joinById(settings.depositGroupId);
