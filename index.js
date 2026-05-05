@@ -16,6 +16,7 @@ const MY_INFO = {
     ownerId: "2481425"  
 };
 
+
 let canOpenBoxes = true; 
 let isPaused = false; 
 let lastBoxCommandTime = 0; 
