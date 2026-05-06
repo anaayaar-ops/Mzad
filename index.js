@@ -7,7 +7,7 @@ const settings = {
     secret: process.env.U_PASS || 'your_password',
     taskGroupId: 224,
     depositGroupId: 224,
-    minuteInterval: 63 * 1000,
+    minuteInterval: 303 * 1000,
     boxInterval: 3 * 60 * 1000
 };
 
@@ -18,7 +18,7 @@ const MY_INFO = {
 
 
 let canOpenBoxes = true; 
-let isPaused = false; 
+let isPaused = false;
 let lastBoxCommandTime = 0; 
 let lastRoutineCommandTime = 0; 
 
