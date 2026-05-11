@@ -13,7 +13,7 @@ const settings = {
 const service = new WOLF();
 let lastAuctionRequestTime = 0;
 
-// --- [دالة تحليل الصورة واستخراج الوقت] ---
+// --- [دالة تحليل الصورة واستخرا الوقت] ---
 const getShortestTimeFromImage = async (imageUrl) => {
     try {
         const { data: { text } } = await Tesseract.recognize(imageUrl, 'ara');
