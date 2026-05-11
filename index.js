@@ -1,26 +1,31 @@
 import 'dotenv/config';
 import wolfjs from 'wolf.js';
-import Tesseract from 'tesseract.js'; // مكتبة قراءة الصور
+import Tesseract from 'tesseract.js';
 const { WOLF } = wolfjs;
 
 const settings = {
     identity: process.env.U_MAIL || 'your_email@example.com',
     secret: process.env.U_PASS || 'your_password',
-    targetGroupId: 9969, // مجموعة المزاد
-    bidAmount: 5 // قيمة الزيادة
+    targetGroupId: 224, 
+    bidAmount: 5 
 };
 
 const service = new WOLF();
 let lastAuctionRequestTime = 0;
 
-// --- [دالة تحليل الصورة واستخراج الوقت] ---
+// --- [دالة تحليل الصورة] ---
 const getShortestTimeFromImage = async (imageUrl) => {
     try {
-        const { data: { text } } = await Tesseract.recognize(imageUrl, 'ara');
+        console.log(`🔍 جاري معالجة الصورة: ${imageUrl}`);
+        // استخدمنا 'eng+ara' لضمان قراءة الأرقام والحروف العربية معاً
+        const { data: { text } } = await Tesseract.recognize(imageUrl, 'ara', {
+            logger: m => { if(m.status === 'recognizing text') console.log(`⏳ تقدم القراءة: ${(m.progress * 100).toFixed(0)}%`); }
+        });
         
-        // البحث عن الأوقات بصيغة (د ث) في النص المستخرج
-        // التعبير النمطي يبحث عن رقم يليه 'د' ثم رقم يليه 'ث'
-        const timePattern = /(\d+)\s*د\s*(\d+)\s*ث/g;
+        console.log("📝 النص المستخرج من الصورة:", text.replace(/\n/g, ' | '));
+
+        // تعبير نمطي أكثر مرونة لجلب الوقت
+        const timePattern = /(\d+)\s*[دd]\s*(\d+)\s*[ثs]/gi;
         let match;
         let shortestSeconds = Infinity;
 
@@ -28,36 +33,36 @@ const getShortestTimeFromImage = async (imageUrl) => {
             const minutes = parseInt(match[1]);
             const seconds = parseInt(match[2]);
             const totalSeconds = (minutes * 60) + seconds;
-
-            if (totalSeconds < shortestSeconds) {
-                shortestSeconds = totalSeconds;
-            }
+            if (totalSeconds < shortestSeconds) shortestSeconds = totalSeconds;
         }
         return shortestSeconds === Infinity ? null : shortestSeconds;
     } catch (error) {
-        console.error("خطأ في تحليل الصورة:", error);
+        console.error("❌ خطأ أثناء تحليل OCR:", error);
         return null;
     }
 };
 
-// --- [إرسال أمر المزاد] ---
 const requestAuctionStatus = async () => {
-    lastAuctionRequestTime = Date.now(); // تسجيل وقت إرسال الأمر بدقة
+    lastAuctionRequestTime = Date.now();
     await service.messaging.sendGroupMessage(settings.targetGroupId, "!مد مزاد");
-    console.log("تم طلب قائمة المزادات...");
+    console.log("📡 تم إرسال أمر (!مد مزاد)");
 };
 
-// --- [معالجة الرسائل المستلمة] ---
 service.on('groupMessage', async (message) => {
     try {
         if (message.targetGroupId !== settings.targetGroupId) return;
 
-        // التحقق مما إذا كانت الرسالة تحتوي على صورة (المزاد)
-        if (message.isImage) {
-            console.log("وصلت صورة المزاد، جاري التحليل...");
+        // سجل لمعرفة نوع كل رسالة تصل
+        console.log(`📩 رسالة جديدة من [${message.sourceSubscriberId}] - النوع: ${message.mimeType || 'text'}`);
+
+        // التحقق من أن الرسالة صورة (دعم أنواع متعددة من الميمز)
+        const isImage = message.isImage || (message.mimeType && message.mimeType.includes('image'));
+        
+        if (isImage) {
+            console.log("🖼️ تم رصد صورة! جاري التحقق من محتواها...");
             
-            // استخراج رابط الصورة
-            const imageUrl = `https://pstatic.wolf.com/image/${message.body}`;
+            const imageId = message.body;
+            const imageUrl = `https://pstatic.wolf.com/image/${imageId}`;
             
             const remainingSeconds = await getShortestTimeFromImage(imageUrl);
 
@@ -65,38 +70,33 @@ service.on('groupMessage', async (message) => {
                 const timePassedSinceRequest = (Date.now() - lastAuctionRequestTime) / 1000;
                 const actualRemainingTime = remainingSeconds - timePassedSinceRequest;
 
-                console.log(`أقصر وقت مكتوب: ${remainingSeconds}ث`);
-                console.log(`الوقت الفعلي المتبقي (بعد خصم تأخير الصورة): ${actualRemainingTime.toFixed(2)}ث`);
+                console.log(`⏱️ وقت المزاد الأصلي: ${remainingSeconds}ث | الفعلي الآن: ${actualRemainingTime.toFixed(1)}ث`);
 
-                // حساب وقت الإرسال: (الوقت المتبقي - 2 ثانية)
-                const waitTime = (actualRemainingTime - 2) * 1000;
+                const waitTime = (actualRemainingTime - 2.5) * 1000; // تركنا 2.5 ثانية للأمان
 
                 if (waitTime > 0) {
-                    console.log(`سيتم المزايدة بعد ${ (waitTime / 1000).toFixed(2) } ثانية...`);
-                    
+                    console.log(`⏲️ المزايدة ستبدأ بعد ${(waitTime / 1000).toFixed(1)} ثانية...`);
                     setTimeout(async () => {
                         await service.messaging.sendGroupMessage(settings.targetGroupId, `!مد مزاد اضافة ${settings.bidAmount}`);
-                        console.log("🚀 تم إرسال أمر المزايدة!");
-                        
-                        // العودة لطلب المزاد مرة أخرى بعد المزايدة بـ 5 ثواني للتأكد
-                        setTimeout(() => requestAuctionStatus(), 5000);
+                        console.log("💥 بوووم! تم إرسال المزايدة.");
                     }, waitTime);
                 } else {
-                    console.log("المزاد قارب على الانتهاء جداً! إرسال المزايدة فوراً...");
+                    console.log("⚠️ الوقت ضيق جداً! مزايدة فورية!");
                     await service.messaging.sendGroupMessage(settings.targetGroupId, `!مد مزاد اضافة ${settings.bidAmount}`);
                 }
+            } else {
+                console.log("❓ لم يتم العثور على توقيت مزاد في هذه الصورة.");
             }
         }
     } catch (err) {
-        console.error("خطأ في المعالجة:", err);
+        console.error("❌ خطأ في معالجة الرسالة:", err);
     }
 });
 
 service.on('ready', async () => {
-    console.log(`🚀 بوت قناص المزادات جاهز`);
+    console.log(`🚀 بوت المزاد جاهز وشغال`);
     try {
         await service.group.joinById(settings.targetGroupId);
-        // ابدأ بطلب المزاد لأول مرة
         requestAuctionStatus();
     } catch (e) {}
 });
