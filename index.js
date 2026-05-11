@@ -5,7 +5,7 @@ const { WOLF } = wolfjs;
 const settings = {
     identity: process.env.U_MAIL || 'your_email@example.com',
     secret: process.env.U_PASS || 'your_password',
-    targetGroupId: 224 // رقم المجموعة التي ستراقبها
+    targetGroupId: 9969// رقم المجموعة التي ستراقبها
 };
 
 const service = new WOLF();
