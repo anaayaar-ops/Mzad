@@ -8,11 +8,11 @@ const settings = {
     taskGroupId: 224,
     depositGroupId: 224 ,
     minuteInterval: 63 * 1000,
-    boxInterval: 30 * 60 * 1000
+    boxInterval: 3 * 60 * 1000
 };
 
 const MY_INFO = {
-    keywords: ["فزآعنا", "أوكسجينه", "اونرنا" ], 
+    keywords: ["" ], 
     ownerId: "2481425"  
 };
 
@@ -138,7 +138,7 @@ service.on('groupMessage', async (message) => {
 
 service.on('ready', async () => {
     console.log(`🚀 البوت جاهز ويراقب الأسماء: ${MY_INFO.keywords.join(', ')}`);
-    console.log(`📡 مراقبة الخاص للعضوية: 80055399 مفعلة`);
+  
     try {
         await service.group.joinById(settings.taskGroupId);
         await service.group.joinById(settings.depositGroupId);
@@ -147,7 +147,7 @@ service.on('ready', async () => {
         setInterval(() => {
             if (canOpenBoxes && !isPaused) {
                 lastBoxCommandTime = Date.now();
-                service.messaging.sendGroupMessage(settings.taskGroupId, ".. ");
+                service.messaging.sendGroupMessage(settings.taskGroupId, "!مد صندوق فتح ");
             }
         }, settings.boxInterval);
     } catch (e) {}
