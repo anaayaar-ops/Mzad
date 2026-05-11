@@ -1,155 +1,103 @@
 import 'dotenv/config';
 import wolfjs from 'wolf.js';
+import Tesseract from 'tesseract.js'; // مكتبة قراءة الصور
 const { WOLF } = wolfjs;
 
 const settings = {
     identity: process.env.U_MAIL || 'your_email@example.com',
     secret: process.env.U_PASS || 'your_password',
-    taskGroupId: 224,
-    depositGroupId: 224 ,
-    minuteInterval: 63 * 1000,
-    boxInterval: 30 * 60 * 1000
+    targetGroupId: 9969, // مجموعة المزاد
+    bidAmount: 5 // قيمة الزيادة
 };
-
-const MY_INFO = {
-    keywords: ["أوكسجينه","اونرنا"], 
-    ownerId: "2481425"  
-};
-
-let canOpenBoxes = true; 
-let isPaused = false;
-let lastBoxCommandTime = 0; 
-let lastRoutineCommandTime = 0; 
-
-const numToWord = {'0':'صفر','1':'واحد','2':'اثنان','3':'ثلاثة','4':'أربعة','5':'خمسة','6':'ستة','7':'سبعة','8':'ثمانية','9':'تسعة','10':'عشرة'};
-const wordToNum = {'صفر':'0','واحد':'1','اثنان':'2','ثلاثة':'3','أربعة':'4','خمسة':'5','ستة':'6','سبعة':'7','ثمانية':'8','تسعة':'9','عشرة':'10'};
 
 const service = new WOLF();
+let lastAuctionRequestTime = 0;
 
-// دالة مساعدة للتحقق من وجود أي من الأسماء في الرسالة
-const hasMyName = (text) => MY_INFO.keywords.some(name => text.includes(name));
-
-const sendRoutineCommands = async () => {
-    if (isPaused) return;
+// --- [دالة تحليل الصورة واستخراج الوقت] ---
+const getShortestTimeFromImage = async (imageUrl) => {
     try {
-        lastRoutineCommandTime = Date.now();
-        await service.messaging.sendGroupMessage(settings.taskGroupId, "!مد مهام");
-        setTimeout(async () => {
-            if (!isPaused) {
-                lastRoutineCommandTime = Date.now(); 
-                await service.messaging.sendGroupMessage(settings.depositGroupId, "!مد تحالف ايداع كل");
+        const { data: { text } } = await Tesseract.recognize(imageUrl, 'ara');
+        
+        // البحث عن الأوقات بصيغة (د ث) في النص المستخرج
+        // التعبير النمطي يبحث عن رقم يليه 'د' ثم رقم يليه 'ث'
+        const timePattern = /(\d+)\s*د\s*(\d+)\s*ث/g;
+        let match;
+        let shortestSeconds = Infinity;
+
+        while ((match = timePattern.exec(text)) !== null) {
+            const minutes = parseInt(match[1]);
+            const seconds = parseInt(match[2]);
+            const totalSeconds = (minutes * 60) + seconds;
+
+            if (totalSeconds < shortestSeconds) {
+                shortestSeconds = totalSeconds;
             }
-        }, 3000);
-    } catch (e) {}
+        }
+        return shortestSeconds === Infinity ? null : shortestSeconds;
+    } catch (error) {
+        console.error("خطأ في تحليل الصورة:", error);
+        return null;
+    }
 };
 
-// --- [القسم الجديد: مراقبة الخاص] ---
-service.on('privateMessage', async (message) => {
-    try {
-        const TARGET_SENDER_ID = 80055399; 
-        const TRIGGER_COMMAND = "!مد صندوق ضمان وقت";
+// --- [إرسال أمر المزاد] ---
+const requestAuctionStatus = async () => {
+    lastAuctionRequestTime = Date.now(); // تسجيل وقت إرسال الأمر بدقة
+    await service.messaging.sendGroupMessage(settings.targetGroupId, "!مد مزاد");
+    console.log("تم طلب قائمة المزادات...");
+};
 
-        if (message.sourceSubscriberId === TARGET_SENDER_ID && message.body.trim() === TRIGGER_COMMAND) {
-            await service.messaging.sendGroupMessage(settings.taskGroupId, TRIGGER_COMMAND);
-            console.log(`[الخاص] تم تمرير أمر الضمان من ${TARGET_SENDER_ID}`);
-        }
-    } catch (err) {}
-});
-
-// --- [معالجة رسائل المجموعات] ---
+// --- [معالجة الرسائل المستلمة] ---
 service.on('groupMessage', async (message) => {
     try {
-        const isTargetGroup = message.targetGroupId === settings.taskGroupId || message.targetGroupId === settings.depositGroupId;
-        if (!isTargetGroup) return;
+        if (message.targetGroupId !== settings.targetGroupId) return;
 
-        const content = message.body;
-
-        // 1. التوقف الإنتاجي
-        if (content.includes("تم إيقاف الأوامر الإنتاجية مؤقتًا") && hasMyName(content)) {
-            const match = content.match(/\d+/); 
-            if (match) {
-                isPaused = true;
-                setTimeout(() => { isPaused = false; }, parseInt(match[0]) * 60 * 1000);
-            }
-            return;
-        }
-
-        // 2. إيقاف الصناديق لنفاذ المفاتيح
-        if (content.includes("لا تملك مفاتيح!") && message.targetGroupId === settings.taskGroupId) {
-            if (Date.now() - lastBoxCommandTime < 5000) canOpenBoxes = false;
-            return;
-        }
-
-        // 3. نظام الأولوية وفك الفخاخ
-        const isTrap = content.includes("لأنك لاعب مجتهد جدًا اليوم") || content.includes("سؤال التحقق الخاص بك هو");
-        const isSafetyAlert = content.includes("يوجد سؤال تحقق نشط");
-
-        if ((isTrap && hasMyName(content)) || isSafetyAlert || (isTrap && content.includes("سؤال التحقق"))) {
+        // التحقق مما إذا كانت الرسالة تحتوي على صورة (المزاد)
+        if (message.isImage) {
+            console.log("وصلت صورة المزاد، جاري التحليل...");
             
-            if (isSafetyAlert) {
-                const now = Date.now();
-                if ((now - lastRoutineCommandTime <= 1000) || (now - lastBoxCommandTime <= 1000)) {
-                    await service.messaging.sendGroupMessage(message.targetGroupId, "!مد فحص");
-                }
-                return;
-            }
+            // استخراج رابط الصورة
+            const imageUrl = `https://pstatic.wolf.com/image/${message.body}`;
+            
+            const remainingSeconds = await getShortestTimeFromImage(imageUrl);
 
-            let answer = null;
+            if (remainingSeconds !== null) {
+                const timePassedSinceRequest = (Date.now() - lastAuctionRequestTime) / 1000;
+                const actualRemainingTime = remainingSeconds - timePassedSinceRequest;
 
-            if (content.includes('عضوية')) answer = MY_INFO.ownerId;
-            else if (content.includes('بالكلمات') || content.includes('بالحروف')) {
-                const match = content.match(/\d+/);
-                if (match && numToWord[match[0]]) answer = numToWord[match[0]];
-            }
-            else if (content.includes('بالأرقام') || content.includes('بالارقام')) {
-                for (let word in wordToNum) { if (content.includes(word)) { answer = wordToNum[word]; break; } }
-            }
-            else if (content.includes('اكتب') && (content.includes('كلمة') || content.includes('كما هي'))) {
-                const match = content.match(/:\s*(\S+)/) || content.match(/هي\s+(\S+)/);
-                if (match) answer = match[1];
-            }
-            else if (content.includes('صح أم خطأ') || content.includes('صح أو خطأ') || content.includes('التحالف') || content.includes('الصناديق')) {
-                answer = "صح";
-            }
-            else if (content.includes('أيهما') || content.includes('ايهما')) {
-                const nums = content.match(/\d+/g);
-                if (nums && nums.length >= 2) {
-                    const n1 = parseInt(nums[0]), n2 = parseInt(nums[1]);
-                    answer = (content.includes('أكبر') || content.includes('اكبر')) ? Math.max(n1, n2) : Math.min(n1, n2);
-                }
-            }
-            else if (content.includes('ناتج') || content.includes('+') || content.includes('-') || content.includes('جمع') || content.includes('طرح')) {
-                const nums = content.match(/\d+/g);
-                if (nums && nums.length >= 2) {
-                    const n1 = parseInt(nums[0]), n2 = parseInt(nums[1]);
-                    answer = (content.includes('-') || content.includes('طرح') || content.includes('ناقص')) ? n1 - n2 : n1 + n2;
-                }
-            }
+                console.log(`أقصر وقت مكتوب: ${remainingSeconds}ث`);
+                console.log(`الوقت الفعلي المتبقي (بعد خصم تأخير الصورة): ${actualRemainingTime.toFixed(2)}ث`);
 
-            if (answer !== null) {
-                setTimeout(async () => {
-                    await service.messaging.sendGroupMessage(message.targetGroupId, `#${answer}`);
-                    setTimeout(() => sendRoutineCommands(), 2000);
-                }, 5000);
+                // حساب وقت الإرسال: (الوقت المتبقي - 2 ثانية)
+                const waitTime = (actualRemainingTime - 2) * 1000;
+
+                if (waitTime > 0) {
+                    console.log(`سيتم المزايدة بعد ${ (waitTime / 1000).toFixed(2) } ثانية...`);
+                    
+                    setTimeout(async () => {
+                        await service.messaging.sendGroupMessage(settings.targetGroupId, `!مد مزاد اضافة ${settings.bidAmount}`);
+                        console.log("🚀 تم إرسال أمر المزايدة!");
+                        
+                        // العودة لطلب المزاد مرة أخرى بعد المزايدة بـ 5 ثواني للتأكد
+                        setTimeout(() => requestAuctionStatus(), 5000);
+                    }, waitTime);
+                } else {
+                    console.log("المزاد قارب على الانتهاء جداً! إرسال المزايدة فوراً...");
+                    await service.messaging.sendGroupMessage(settings.targetGroupId, `!مد مزاد اضافة ${settings.bidAmount}`);
+                }
             }
         }
-    } catch (err) {}
+    } catch (err) {
+        console.error("خطأ في المعالجة:", err);
+    }
 });
 
 service.on('ready', async () => {
-    console.log(`🚀 البوت جاهز ويراقب الأسماء: ${MY_INFO.keywords.join(', ')}`);
-  
+    console.log(`🚀 بوت قناص المزادات جاهز`);
     try {
-        await service.group.joinById(settings.taskGroupId);
-        await service.group.joinById(settings.depositGroupId);
-        sendRoutineCommands();
-        setInterval(() => sendRoutineCommands(), settings.minuteInterval);
-        setInterval(() => {
-            if (canOpenBoxes && !isPaused) {
-                lastBoxCommandTime = Date.now();
-                service.messaging.sendGroupMessage(settings.taskGroupId, ".. ");
-            }
-        }, settings.boxInterval);
+        await service.group.joinById(settings.targetGroupId);
+        // ابدأ بطلب المزاد لأول مرة
+        requestAuctionStatus();
     } catch (e) {}
 });
 
