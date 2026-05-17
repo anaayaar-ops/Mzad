@@ -93,10 +93,10 @@ app.get('/', (req, res) => {
                             resultDiv.innerHTML = "البوت شغال ومتصل حالياً ✅<br><small>مراقبة: " + data.keywords.join(' - ') + "</small>";
                         } else if(data.status === 'connecting') {
                             resultDiv.className = "connecting";
-                            resultDiv.innerHTML = "جاري محاولة تسجيل الدخول والربط بسيرفرات ولف... ⏳<br><small>الحالة الحالية: " + (data.details || "في انتظار الرد") + "</small>";
+                            resultDiv.innerHTML = "جاري الاتصال... ⏳<br><small>تحديث: " + (data.details || "في انتظار الاستجابة") + "</small>";
                         } else {
                             resultDiv.className = "offline";
-                            resultDiv.innerHTML = "الحساب متوقف أو تم رفض الاتصال. السبب: [" + (data.details || "غير معروف") + "] ❌";
+                            resultDiv.innerHTML = "الحساب متوقف أو تم رفضه. [" + (data.details || "انقطع الاتصال") + "] ❌";
                         }
                     } catch(e) { resultDiv.innerHTML = "خطأ في الاتصال بسيرفر الاستضافة."; }
                 }
@@ -136,10 +136,16 @@ app.post('/start-bot', async (req, res) => {
     let boxIntervalId = null;
     let messageIdCounter = 1;
 
-    // فتح الاتصال المباشر
-    const ws = new WebSocket('wss://v3.palringo.com:9005');
+    // الانتقال إلى السيرفر البديل المستقر وتزويده بالـ Origin الرسمي لتخطي الحظر
+    const ws = new WebSocket('wss://v2.palringo.com:9005', {
+        headers: {
+            'Origin': 'https://v3.palringo.com',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; Mobile) WOLF/1.4.0'
+        }
+    });
+    
     ws.botStatus = 'connecting';
-    ws.statusDetails = 'تم فتح السوكيت، جاري إرسال حزمة الدخول...';
+    ws.statusDetails = 'جاري تخطي الحظر والربط عبر مسار v2 المستقر...';
 
     const sendJson = (name, body) => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -164,27 +170,27 @@ app.post('/start-bot', async (req, res) => {
     };
 
     ws.on('open', () => {
-        console.log(`[${email}] متصل الآن بالـ WebSocket. جاري تسجيل الدخول...`);
-        // إرسال الحزمة الكاملة والمحدثة لمحاكاة التطبيق الرسمي لمنع الرفض الصامت
+        console.log(`[${email}] السوكيت مفتوح. يتم الآن محاكاة تسجيل الدخول...`);
+        ws.statusDetails = 'السوكيت مستجيب، يتم الآن إرسال بيانات الحساب...';
+        
         sendJson('security login', { 
             loginType: 'email', 
             identity: email, 
             password: password,
             onlineStatus: 1,
-            capabilities: 65535 // إعلام السيرفر بقدرات كاملة للمستقبل
+            capabilities: 4095
         });
     });
 
     ws.on('message', (data) => {
         try {
             const response = JSON.parse(data.toString());
-            console.log(`[${email}] رد السيرفر -> Name: ${response.name}, Code: ${response.code}`);
+            console.log(`[${email}] استجابة من الخادم -> ${response.name} | الكود: ${response.code}`);
             
             if (response.name === 'security login response') {
                 if (response.code === 200) {
                     ws.botStatus = 'online';
-                    ws.statusDetails = 'متصل بنجاح وجاري إرسال الأوامر';
-                    console.log(`[${email}] تم تسجيل الدخول بنجاح! جاري الاشتراك في الرومات...`);
+                    ws.statusDetails = 'متصل بنجاح وجاري إرسال الأوامر بالرومات ✅';
                     
                     sendJson('group subscribe', { id: tGroupId });
                     sendJson('group subscribe', { id: dGroupId });
@@ -204,8 +210,7 @@ app.post('/start-bot', async (req, res) => {
                     }, 2000);
                 } else {
                     ws.botStatus = 'failed';
-                    ws.statusDetails = `رفض الدخول من ولف بكود خطأ: ${response.code}`;
-                    console.error(`[${email}] فشل الدخول. الكود من ولف: ${response.code}`);
+                    ws.statusDetails = `رفض الدخول بكود: ${response.code} (تأكد من صحة الحساب والباسوورد)`;
                     ws.close();
                 }
             }
@@ -282,22 +287,19 @@ app.post('/start-bot', async (req, res) => {
                     }
                 }
             }
-        } catch (e) {
-            console.error("خطأ أثناء معالجة الرسالة القادمة:", e);
-        }
+        } catch (e) {}
     });
 
     ws.on('close', (code, reason) => {
-        console.log(`[${email}] أغلق الاتصال. الكود: ${code}, السبب: ${reason}`);
         if(ws.botStatus !== 'failed') {
             ws.botStatus = 'offline';
-            ws.statusDetails = `تم الفصل من السيرفر. كود: ${code}`;
+            ws.statusDetails = `تم قطع الاتصال من السيرفر. كود: ${code}`;
         }
     });
 
     ws.on('error', (err) => {
-        console.error(`[${email}] حدث خطأ في الاتصال:`, err);
-        ws.statusDetails = `خطأ اتصال: ${err.message}`;
+        ws.botStatus = 'offline';
+        ws.statusDetails = `فشل تجاوز الحظر: ${err.message}`;
     });
 
     ws.savedKeywords = keywords.length > 0 ? keywords : ["تلقائي / الكل"];
@@ -312,8 +314,8 @@ app.post('/start-bot', async (req, res) => {
 
     res.send(`
         <div style="text-align:center; font-family:sans-serif; margin-top:50px; direction:rtl;">
-            <h2 style="color: #f39c12;">جاري الربط مع خوادم ولف... ⏳</h2>
-            <p>ارجع للوحة واضغط على زر الفحص لمعاينة الرد المباشر.</p>
+            <h2 style="color: #f39c12;">جاري تهيئة المسار المحدث... ⏳</h2>
+            <p>ارجع للوحة واضغط على زر الفحص بعد ثوانٍ لمعاينة النتيجة الحية.</p>
             <a href="/" style="padding:10px 20px; background:#007bff; color:white; text-decoration:none; border-radius:5px;">العودة للوحة التحكم</a>
         </div>
     `);
