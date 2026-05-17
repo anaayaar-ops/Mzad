@@ -49,19 +49,19 @@ app.get('/', (req, res) => {
                     <label>كلمة المرور:</label>
                     <input type="password" name="password" placeholder="••••••••" required>
                     
-                    <label>رقم روم اللعب / المهام (Task Group ID):</label>
-                    <input type="number" name="taskGroupId" placeholder="اترك الخانة فارغة واكتب رقم الروم مباشرة..." required>
+                    عضوية روم لعب المهام (Task Group ID):</label>
+                    <input type="number" name="taskGroupId" placeholder="  " required>
                     
-                    <label>رقم روم الإيداع / التحالف (Deposit Group ID):</label>
-                    <input type="number" name="depositGroupId" placeholder="اترك الخانة فارغة واكتب رقم الروم مباشرة..." required>
+                    <label>عضوية روم الايداع (Deposit Group ID):</label>
+                    <input type="number" name="depositGroupId" placeholder="  " required>
                     
-                    <label>الاسم الأول أو الكلمة المفتاحية 1:</label>
-                    <input type="text" name="keyword1" placeholder="مثال: شكرّا أصحابي (اختياري)">
+                    <label>الاسم :</label>
+                    <input type="text" name="keyword1" placeholder="  ">
                     
-                    <label>الاسم الثاني أو الكلمة المفتاحية 2:</label>
-                    <input type="text" name="keyword2" placeholder="مثال: اونرنا (اختياري)">
+                    <label>الاسم الثاني :</label>
+                    <input type="text" name="keyword2" placeholder="  ">
                     
-                    <button type="submit" class="btn-start">تشغيل الحساب الفردي الآن 🚀</button>
+                    <button type="submit" class="btn-start">تشغيل الحساب الآن 🚀</button>
                 </form>
             </div>
             <div class="card">
