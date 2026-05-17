@@ -8,6 +8,6 @@
   },
   "dependencies": {
     "express": "^4.19.2",
-    "@viva-wolf/core": "^1.2.0"
+    "ws": "^8.16.0"
   }
 }
