@@ -1,19 +1,15 @@
 import express from 'express';
-import wolfjs from '@viva-wolf/core';
-const { WOLF } = wolfjs;
-
+import WebSocket from 'ws';
 
 const app = express();
-
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 const activeBots = {};
-
-const numToWord = {'0':'صفر','1':'واحد','2':'اثنان','3 लिखें':'ثلاثة','3':'ثلاثة','4':'أربعة','5':'خمسة','6':'ستة','7':'سبعة','8':'ثمانية','9':'تسعة','10':'عشرة'};
+const numToWord = {'0':'صفر','1':'واحد','2':'اثنان','3':'ثلاثة','4':'أربعة','5':'خمسة','6':'ستة','7':'سبعة','8':'ثمانية','9':'تسعة','10':'عشرة'};
 const wordToNum = {'صفر':'0','واحد':'1','اثنان':'2','ثلاثة':'3','أربعة':'4','خمسة':'5','ستة':'6','سبعة':'7','ثمانية':'8','تسعة':'9','عشرة':'10'};
 
-// واجهة المستخدم الرسومية للموقع
+// واجهة التحكم الرسومية المعتمدة لديك
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -41,58 +37,43 @@ app.get('/', (req, res) => {
             </style>
         </head>
         <body>
-
             <h2>🤖 لوحة تحكم بوت ولف للفعاليات</h2>
-            
             <div class="card">
                 <h3>🚀 تشغيل حساب جديد</h3>
                 <form action="/start-bot" method="POST">
                     <label>إيميل الحساب في ولف:</label>
                     <input type="email" name="email" placeholder="example@mail.com" required>
-                    
                     <label>كلمة المرور:</label>
                     <input type="password" name="password" placeholder="••••••••" required>
-                    
                     <label>رقم روم اللعب / المهام (Task Group ID):</label>
                     <input type="number" name="taskGroupId" placeholder="224" required>
-                    
                     <label>رقم روم الإيداع / التحالف (Deposit Group ID):</label>
                     <input type="number" name="depositGroupId" placeholder="224" required>
-                    
                     <label>رقم عضويتك لحل الفخاخ (Owner ID):</label>
                     <input type="number" name="ownerId" placeholder="2481425" required>
-
                     <label>الاسم الأول أو الكلمة المفتاحية 1:</label>
                     <input type="text" name="keyword1" value="شكرّا أصحابي" required>
-
                     <label>الاسم الثاني أو الكلمة المفتاحية 2:</label>
                     <input type="text" name="keyword2" value="اونرنا" required>
-                    
                     <button type="submit" class="btn-start">تشغيل الحساب الفردي الآن 🚀</button>
                 </form>
             </div>
-
             <div class="card">
                 <h3>🔍 الفحص السريع والإيقاف</h3>
                 <label>أدخل الإيميل المسجل للتحكم به:</label>
                 <input type="email" id="controlEmail" placeholder="أدخل الإيميل هنا...">
-                
                 <button onclick="checkStatus()" class="btn-status">فحص الحالة المباشرة 🔍</button>
-                
                 <form action="/stop-bot" method="POST" onsubmit="return prepareStop()">
                     <input type="hidden" name="email" id="hiddenStopEmail">
                     <button type="submit" class="btn-stop">إيقاف الحساب وفصله تماماً 🛑</button>
                 </form>
-                
                 <div id="statusResult"></div>
             </div>
-
             <script>
                 async function checkStatus() {
                     const email = document.getElementById('controlEmail').value;
                     const resultDiv = document.getElementById('statusResult');
                     if(!email) { alert('ضع الإيميل أولاً لقراءة حالته!'); return; }
-                    
                     resultDiv.innerHTML = "جاري الفحص...";
                     try {
                         const response = await fetch('/api/status', {
@@ -110,7 +91,6 @@ app.get('/', (req, res) => {
                         }
                     } catch(e) { resultDiv.innerHTML = "خطأ في الاتصال."; }
                 }
-
                 function prepareStop() {
                     const email = document.getElementById('controlEmail').value;
                     if(!email) { alert('أدخل الإيميل أولاً ليتم إيقافه!'); return false; }
@@ -123,175 +103,165 @@ app.get('/', (req, res) => {
     `);
 });
 
-// استقبال طلبات التشغيل من الموقع وعزل متغيرات الحساب
 app.post('/start-bot', async (req, res) => {
     const { email, password, taskGroupId, depositGroupId, ownerId, keyword1, keyword2 } = req.body;
 
     if (activeBots[email]) {
-        try { activeBots[email].customCleanup(); } catch(e){}
+        try { activeBots[email].close(); } catch(e){}
     }
 
-    const settings = {
-        identity: email,
-        secret: password,
-        taskGroupId: parseInt(taskGroupId),
-        depositGroupId: parseInt(depositGroupId),
-        minuteInterval: 63 * 1000,
-        boxInterval: 3 * 60 * 1000
-    };
+    const tGroupId = parseInt(taskGroupId);
+    const dGroupId = parseInt(depositGroupId);
+    const keywords = [keyword1.trim(), keyword2.trim()];
+    const hasMyName = (text) => keywords.some(name => text.includes(name));
 
-    const MY_INFO = {
-        keywords: [keyword1.trim(), keyword2.trim()], 
-        ownerId: String(ownerId)
-    };
-
-    let canOpenBoxes = true; 
+    let canOpenBoxes = true;
     let isPaused = false;
-    let lastBoxCommandTime = 0; 
-    let lastRoutineCommandTime = 0; 
+    let lastBoxCommandTime = 0;
+    let lastRoutineCommandTime = 0;
     let routineIntervalId = null;
     let boxIntervalId = null;
+    let messageIdCounter = 1;
 
-    const service = new WOLF();
+    // اتصال مدمج ومباشر عبر السوكيت لتفادي أخطاء التحميل الخارجية
+    const ws = new WebSocket('wss://v3.palringo.com:9005');
 
-    const hasMyName = (text) => MY_INFO.keywords.some(name => text.includes(name));
-
-    const sendRoutineCommands = async () => {
-        if (isPaused) return;
-        try {
-            lastRoutineCommandTime = Date.now();
-            await service.messaging.sendGroupMessage(settings.taskGroupId, "!مد مهام");
-            setTimeout(async () => {
-                if (!isPaused) {
-                    lastRoutineCommandTime = Date.now(); 
-                    await service.messaging.sendGroupMessage(settings.depositGroupId, "!مد تحالف ايداع كل");
-                }
-            }, 3000);
-        } catch (e) {}
+    const sendJson = (name, body) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ id: messageIdCounter++, name, body }));
+        }
     };
 
-    // تمت إزالة حدث مراقبة الخاص (privateMessage) بالكامل من هنا
+    const sendGroupMessage = (groupId, content) => {
+        sendJson('message send', { targetGroupId: groupId, mimeType: 'text/plain', body: content });
+    };
 
-    service.on('groupMessage', async (message) => {
+    const sendRoutineCommands = () => {
+        if (isPaused) return;
+        lastRoutineCommandTime = Date.now();
+        sendGroupMessage(tGroupId, "!مد مهام");
+        setTimeout(() => {
+            if (!isPaused) {
+                lastRoutineCommandTime = Date.now();
+                sendGroupMessage(dGroupId, "!مد تحالف ايداع كل");
+            }
+        }, 3000);
+    };
+
+    ws.on('open', () => {
+        sendJson('security login', { loginType: 'email', identity: email, password: password });
+    });
+
+    ws.on('message', (data) => {
         try {
-            const isTargetGroup = message.targetGroupId === settings.taskGroupId || message.targetGroupId === settings.depositGroupId;
-            if (!isTargetGroup) return;
-
-            const content = message.body;
-
-            if (content.includes("تم إيقاف الأوامر الإنتاجية مؤقتًا") && hasMyName(content)) {
-                const match = content.match(/\d+/); 
-                if (match) {
-                    isPaused = true;
-                    setTimeout(() => { isPaused = false; }, parseInt(match[0]) * 60 * 1000);
-                }
-                return;
+            const response = JSON.parse(data.toString());
+            
+            if (response.name === 'security login response' && response.code === 200) {
+                // انضمام للرومات وتفعيل التايمرات فور الاتصال بنجاح
+                sendJson('group subscribe', { id: tGroupId });
+                sendJson('group subscribe', { id: dGroupId });
+                
+                sendRoutineCommands();
+                routineIntervalId = setInterval(sendRoutineCommands, 63000);
+                boxIntervalId = setInterval(() => {
+                    if (canOpenBoxes && !isPaused) {
+                        lastBoxCommandTime = Date.now();
+                        sendGroupMessage(tGroupId, "!مد صندوق فتح ");
+                    }
+                }, 180000);
             }
 
-            if (content.includes("لا تملك مفاتيح!") && message.targetGroupId === settings.taskGroupId) {
-                if (Date.now() - lastBoxCommandTime < 5000) canOpenBoxes = false;
-                return;
-            }
+            if (response.name === 'message notify') {
+                const msg = response.body;
+                const isTargetGroup = msg.targetGroupId === tGroupId || msg.targetGroupId === dGroupId;
+                if (!isTargetGroup || msg.mimeType !== 'text/plain') return;
 
-            const isTrap = content.includes("لأنك لاعب مجتهد جدًا اليوم") || content.includes("سؤال التحقق الخاص بك هو");
-            const isSafetyAlert = content.includes("يوجد سؤال تحقق نشط");
+                const content = msg.body;
 
-            if ((isTrap && hasMyName(content)) || isSafetyAlert || (isTrap && content.includes("سؤال التحقق"))) {
-                if (isSafetyAlert) {
-                    const now = Date.now();
-                    if ((now - lastRoutineCommandTime <= 1000) || (now - lastBoxCommandTime <= 1000)) {
-                        await service.messaging.sendGroupMessage(message.targetGroupId, "!مد فحص");
+                if (content.includes("تم إيقاف الأوامر الإنتاجية مؤقتًا") && hasMyName(content)) {
+                    const match = content.match(/\d+/);
+                    if (match) {
+                        isPaused = true;
+                        setTimeout(() => { isPaused = false; }, parseInt(match[0]) * 60 * 1000);
                     }
                     return;
                 }
 
-                let answer = null;
-                if (content.includes('عضوية')) answer = MY_INFO.ownerId;
-                else if (content.includes('بالكلمات') || content.includes('بالحروف')) {
-                    const match = content.match(/\d+/);
-                    if (match && numToWord[match[0]]) answer = numToWord[match[0]];
-                }
-                else if (content.includes('بالأرقام') || content.includes('بالارقام')) {
-                    for (let word in wordToNum) { if (content.includes(word)) { answer = wordToNum[word]; break; } }
-                }
-                else if (content.includes('اكتب') && (content.includes('كلمة') || content.includes('كما هي'))) {
-                    const match = content.match(/:\s*(\S+)/) || content.match(/هي\s+(\S+)/);
-                    if (match) answer = match[1];
-                }
-                else if (content.includes('صح أم خطأ') || content.includes('صح أو خطأ') || content.includes('التحالف') || content.includes('الصناديق')) {
-                    answer = "صح";
-                }
-                else if (content.includes('أيهما') || content.includes('ايهما')) {
-                    const nums = content.match(/\d+/g);
-                    if (nums && nums.length >= 2) {
-                        const n1 = parseInt(nums[0]), n2 = parseInt(nums[1]);
-                        answer = (content.includes('أكبر') || content.includes('اكبر')) ? Math.max(n1, n2) : Math.min(n1, n2);
-                    }
-                }
-                else if (content.includes('ناتج') || content.includes('+') || content.includes('-') || content.includes('جمع') || content.includes('طرح')) {
-                    const nums = content.match(/\d+/g);
-                    if (nums && nums.length >= 2) {
-                        const n1 = parseInt(nums[0]), n2 = parseInt(nums[1]);
-                        answer = (content.includes('-') || content.includes('طرح') || content.includes('ناقص')) ? n1 - n2 : n1 + n2;
-                    }
+                if (content.includes("لا تملك مفاتيح!") && msg.targetGroupId === tGroupId) {
+                    if (Date.now() - lastBoxCommandTime < 5000) canOpenBoxes = false;
+                    return;
                 }
 
-                if (answer !== null) {
-                    setTimeout(async () => {
-                        await service.messaging.sendGroupMessage(message.targetGroupId, `#${answer}`);
-                        setTimeout(() => sendRoutineCommands(), 2000);
-                    }, 5000);
+                const isTrap = content.includes("لأنك لاعب مجتهد جدًا اليوم") || content.includes("سؤال التحقق الخاص بك هو");
+                const isSafetyAlert = content.includes("يوجد سؤال تحقق نشط");
+
+                if ((isTrap && hasMyName(content)) || isSafetyAlert || (isTrap && content.includes("سؤال التحقق"))) {
+                    if (isSafetyAlert) {
+                        const now = Date.now();
+                        if ((now - lastRoutineCommandTime <= 1000) || (now - lastBoxCommandTime <= 1000)) {
+                            sendGroupMessage(msg.targetGroupId, "!مد فحص");
+                        }
+                        return;
+                    }
+
+                    let answer = null;
+                    if (content.includes('عضوية')) answer = String(ownerId);
+                    else if (content.includes('بالكلمات') || content.includes('بالحروف')) {
+                        const match = content.match(/\d+/);
+                        if (match && numToWord[match[0]]) answer = numToWord[match[0]];
+                    }
+                    else if (content.includes('بالأرقام') || content.includes('بالارقام')) {
+                        for (let word in wordToNum) { if (content.includes(word)) { answer = wordToNum[word]; break; } }
+                    }
+                    else if (content.includes('اكتب') && (content.includes('كلمة') || content.includes('كما هي'))) {
+                        const match = content.match(/:\s*(\S+)/) || content.match(/هي\s+(\S+)/);
+                        if (match) answer = match[1];
+                    }
+                    else if (content.includes('صح أم خطأ') || content.includes('صح أو خطأ') || content.includes('التحالف') || content.includes('الصناديق')) {
+                        answer = "صح";
+                    }
+                    else if (content.includes('أيهما') || content.includes('ايهما')) {
+                        const nums = content.match(/\d+/g);
+                        if (nums && nums.length >= 2) {
+                            const n1 = parseInt(nums[0]), n2 = parseInt(nums[1]);
+                            answer = (content.includes('أكبر') || content.includes('اكبر')) ? Math.max(n1, n2) : Math.min(n1, n2);
+                        }
+                    }
+                    else if (content.includes('ناتج') || content.includes('+') || content.includes('-') || content.includes('جمع') || content.includes('طرح')) {
+                        const nums = content.match(/\d+/g);
+                        if (nums && nums.length >= 2) {
+                            const n1 = parseInt(nums[0]), n2 = parseInt(nums[1]);
+                            answer = (content.includes('-') || content.includes('طرح') || content.includes('ناقص')) ? n1 - n2 : n1 + n2;
+                        }
+                    }
+
+                    if (answer !== null) {
+                        setTimeout(() => {
+                            sendGroupMessage(msg.targetGroupId, `#${answer}`);
+                            setTimeout(() => sendRoutineCommands(), 2000);
+                        }, 5000);
+                    }
                 }
             }
-        } catch (err) {}
-    });
-
-    service.on('ready', async () => {
-        try {
-            await service.group.joinById(settings.taskGroupId);
-            await service.group.joinById(settings.depositGroupId);
-            
-            sendRoutineCommands();
-            
-            routineIntervalId = setInterval(() => sendRoutineCommands(), settings.minuteInterval);
-            boxIntervalId = setInterval(() => {
-                if (canOpenBoxes && !isPaused) {
-                    lastBoxCommandTime = Date.now();
-                    service.messaging.sendGroupMessage(settings.taskGroupId, "!مد صندوق فتح ");
-                }
-            }, settings.boxInterval);
-            
         } catch (e) {}
     });
 
-    try {
-        await service.login(settings.identity, settings.secret);
-        
-        service.customCleanup = () => {
-            if (routineIntervalId) clearInterval(routineIntervalId);
-            if (boxIntervalId) clearInterval(boxIntervalId);
-            try { service.destroy(); } catch(e){}
-        };
+    ws.savedKeywords = keywords;
+    ws.customCleanup = () => {
+        if (routineIntervalId) clearInterval(routineIntervalId);
+        if (boxIntervalId) clearInterval(boxIntervalId);
+        try { ws.close(); } catch(e){}
+    };
 
-        service.savedKeywords = MY_INFO.keywords;
-        activeBots[email] = service;
+    activeBots[email] = ws;
 
-        res.send(`
-            <div style="text-align:center; font-family:sans-serif; margin-top:50px; direction:rtl;">
-                <h2 style="color: #28a745;">تم تشغيل البوت بنجاح! 🎉</h2>
-                <p>الحساب متصل وبدأ بمراقبة الأسماء: (${MY_INFO.keywords.join(' - ')})</p>
-                <a href="/" style="padding:10px 20px; background:#007bff; color:white; text-decoration:none; border-radius:5px;">العودة للوحة التحكم</a>
-            </div>
-        `);
-    } catch (error) {
-        res.send(`
-            <div style="text-align:center; font-family:sans-serif; margin-top:50px; direction:rtl;">
-                <h2 style="color: #dc3545;">خطأ في تسجيل الدخول لحسابك! ❌</h2>
-                <p>تأكد من صحة الإيميل أو الباسورد</p>
-                <a href="/" style="padding:10px 20px; background:#007bff; color:white; text-decoration:none; border-radius:5px;">العودة والتصحيح</a>
-            </div>
-        `);
-    }
+    res.send(`
+        <div style="text-align:center; font-family:sans-serif; margin-top:50px; direction:rtl;">
+            <h2 style="color: #28a745;">تم تفعيل اتصال البوت المستقل بنجاح! 🎉</h2>
+            <p>الحساب يراقب الآن الأسماء: (${keywords.join(' - ')})</p>
+            <a href="/" style="padding:10px 20px; background:#007bff; color:white; text-decoration:none; border-radius:5px;">العودة للوحة التحكم</a>
+        </div>
+    `);
 });
 
 app.post('/stop-bot', (req, res) => {
@@ -306,13 +276,13 @@ app.post('/stop-bot', (req, res) => {
             </div>
         `);
     } else {
-        res.send("الحساب متوقف بالفعل أو لم يتم تشغيله مطلقاً. <a href='/'>عودة</a>");
+        res.send("الحساب متوقف بالفعل. <a href='/'>عودة</a>");
     }
 });
 
 app.post('/api/status', (req, res) => {
     const { email } = req.body;
-    if (activeBots[email]) {
+    if (activeBots[email] && activeBots[email].readyState === WebSocket.OPEN) {
         res.json({ active: true, keywords: activeBots[email].savedKeywords });
     } else {
         res.json({ active: false });
@@ -320,4 +290,4 @@ app.post('/api/status', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 السيرفر يعمل على منفذ ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 السيرفر المستقل يعمل على منفذ ${PORT}`));
