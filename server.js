@@ -1,6 +1,7 @@
 import express from 'express';
-import wolfjs from 'wolf.js';
+import wolfjs from '@wolf-js/core';
 const { WOLF } = wolfjs;
+
 
 const app = express();
 
