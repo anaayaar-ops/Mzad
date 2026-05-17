@@ -6,10 +6,12 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 const activeBots = {};
+const FIXED_OWNER_ID = 2481425; // تثبيت رقم العضوية الخاص بك تلقائياً هنا
+
 const numToWord = {'0':'صفر','1':'واحد','2':'اثنان','3':'ثلاثة','4':'أربعة','5':'خمسة','6':'ستة','7':'سبعة','8':'ثمانية','9':'تسعة','10':'عشرة'};
 const wordToNum = {'صفر':'0','واحد':'1','اثنان':'2','ثلاثة':'3','أربعة':'4','خمسة':'5','ستة':'6','سبعة':'7','ثمانية':'8','تسعة':'9','عشرة':'10'};
 
-// واجهة التحكم الرسومية المعتمدة لديك
+// واجهة التحكم الرسومية بعد التعديل والتبسيط
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -43,18 +45,22 @@ app.get('/', (req, res) => {
                 <form action="/start-bot" method="POST">
                     <label>إيميل الحساب في ولف:</label>
                     <input type="email" name="email" placeholder="example@mail.com" required>
+                    
                     <label>كلمة المرور:</label>
                     <input type="password" name="password" placeholder="••••••••" required>
+                    
                     <label>رقم روم اللعب / المهام (Task Group ID):</label>
-                    <input type="number" name="taskGroupId" placeholder="224" required>
+                    <input type="number" name="taskGroupId" placeholder="اترك الخانة فارغة واكتب رقم الروم مباشرة..." required>
+                    
                     <label>رقم روم الإيداع / التحالف (Deposit Group ID):</label>
-                    <input type="number" name="depositGroupId" placeholder="224" required>
-                    <label>رقم عضويتك لحل الفخاخ (Owner ID):</label>
-                    <input type="number" name="ownerId" placeholder="2481425" required>
+                    <input type="number" name="depositGroupId" placeholder="اترك الخانة فارغة واكتب رقم الروم مباشرة..." required>
+                    
                     <label>الاسم الأول أو الكلمة المفتاحية 1:</label>
-                    <input type="text" name="keyword1" value="شكرّا أصحابي" required>
+                    <input type="text" name="keyword1" placeholder="مثال: شكرّا أصحابي (اختياري)">
+                    
                     <label>الاسم الثاني أو الكلمة المفتاحية 2:</label>
-                    <input type="text" name="keyword2" value="اونرنا" required>
+                    <input type="text" name="keyword2" placeholder="مثال: اونرنا (اختياري)">
+                    
                     <button type="submit" class="btn-start">تشغيل الحساب الفردي الآن 🚀</button>
                 </form>
             </div>
@@ -104,7 +110,7 @@ app.get('/', (req, res) => {
 });
 
 app.post('/start-bot', async (req, res) => {
-    const { email, password, taskGroupId, depositGroupId, ownerId, keyword1, keyword2 } = req.body;
+    const { email, password, taskGroupId, depositGroupId, keyword1, keyword2 } = req.body;
 
     if (activeBots[email]) {
         try { activeBots[email].close(); } catch(e){}
@@ -112,8 +118,13 @@ app.post('/start-bot', async (req, res) => {
 
     const tGroupId = parseInt(taskGroupId);
     const dGroupId = parseInt(depositGroupId);
-    const keywords = [keyword1.trim(), keyword2.trim()];
-    const hasMyName = (text) => keywords.some(name => text.includes(name));
+    
+    // تجميع الكلمات المفتاحية المدخلة من قِبل المستخدم وتجنب المشاكل إن كانت فارغة
+    const keywords = [];
+    if (keyword1 && keyword1.trim() !== "") keywords.push(keyword1.trim());
+    if (keyword2 && keyword2.trim() !== "") keywords.push(keyword2.trim());
+    
+    const hasMyName = (text) => keywords.length === 0 || keywords.some(name => text.includes(name));
 
     let canOpenBoxes = true;
     let isPaused = false;
@@ -123,7 +134,6 @@ app.post('/start-bot', async (req, res) => {
     let boxIntervalId = null;
     let messageIdCounter = 1;
 
-    // اتصال مدمج ومباشر عبر السوكيت لتفادي أخطاء التحميل الخارجية
     const ws = new WebSocket('wss://v3.palringo.com:9005');
 
     const sendJson = (name, body) => {
@@ -157,7 +167,6 @@ app.post('/start-bot', async (req, res) => {
             const response = JSON.parse(data.toString());
             
             if (response.name === 'security login response' && response.code === 200) {
-                // انضمام للرومات وتفعيل التايمرات فور الاتصال بنجاح
                 sendJson('group subscribe', { id: tGroupId });
                 sendJson('group subscribe', { id: dGroupId });
                 
@@ -205,7 +214,7 @@ app.post('/start-bot', async (req, res) => {
                     }
 
                     let answer = null;
-                    if (content.includes('عضوية')) answer = String(ownerId);
+                    if (content.includes('عضوية')) answer = String(FIXED_OWNER_ID); // إرسال العضوية الثابتة تلقائياً هنا
                     else if (content.includes('بالكلمات') || content.includes('بالحروف')) {
                         const match = content.match(/\d+/);
                         if (match && numToWord[match[0]]) answer = numToWord[match[0]];
@@ -246,7 +255,7 @@ app.post('/start-bot', async (req, res) => {
         } catch (e) {}
     });
 
-    ws.savedKeywords = keywords;
+    ws.savedKeywords = keywords.length > 0 ? keywords : ["تلقائي / الكل"];
     ws.customCleanup = () => {
         if (routineIntervalId) clearInterval(routineIntervalId);
         if (boxIntervalId) clearInterval(boxIntervalId);
@@ -258,7 +267,7 @@ app.post('/start-bot', async (req, res) => {
     res.send(`
         <div style="text-align:center; font-family:sans-serif; margin-top:50px; direction:rtl;">
             <h2 style="color: #28a745;">تم تفعيل اتصال البوت المستقل بنجاح! 🎉</h2>
-            <p>الحساب يراقب الآن الأسماء: (${keywords.join(' - ')})</p>
+            <p>الحساب يراقب الآن الأسماء: (${ws.savedKeywords.join(' - ')})</p>
             <a href="/" style="padding:10px 20px; background:#007bff; color:white; text-decoration:none; border-radius:5px;">العودة للوحة التحكم</a>
         </div>
     `);
