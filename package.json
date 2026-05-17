@@ -8,6 +8,6 @@
   },
   "dependencies": {
     "express": "^4.19.2",
-    "@wolf-js/sdk": "^1.4.0"
+    "@viva-wolf/core": "^1.2.0"
   }
 }
