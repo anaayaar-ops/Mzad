@@ -6,12 +6,11 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 const activeBots = {};
-const FIXED_OWNER_ID = 2481425; // تثبيت رقم العضوية الخاص بك تلقائياً هنا
+const FIXED_OWNER_ID = 2481425; 
 
 const numToWord = {'0':'صفر','1':'واحد','2':'اثنان','3':'ثلاثة','4':'أربعة','5':'خمسة','6':'ستة','7':'سبعة','8':'ثمانية','9':'تسعة','10':'عشرة'};
 const wordToNum = {'صفر':'0','واحد':'1','اثنان':'2','ثلاثة':'3','أربعة':'4','خمسة':'5','ستة':'6','سبعة':'7','ثمانية':'8','تسعة':'9','عشرة':'10'};
 
-// واجهة التحكم الرسومية بعد التعديل والتبسيط
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -36,6 +35,7 @@ app.get('/', (req, res) => {
                 #statusResult { text-align: center; font-weight: bold; margin-top: 15px; padding: 10px; border-radius: 6px; }
                 .online { color: #2ecc71; background: #e8f8f0; }
                 .offline { color: #e74c3c; background: #fdeaea; }
+                .connecting { color: #f39c12; background: #fef5e7; }
             </style>
         </head>
         <body>
@@ -49,19 +49,19 @@ app.get('/', (req, res) => {
                     <label>كلمة المرور:</label>
                     <input type="password" name="password" placeholder="••••••••" required>
                     
-                    عضوية روم لعب المهام (Task Group ID):</label>
-                    <input type="number" name="taskGroupId" placeholder="  " required>
+                    <label>رقم روم اللعب / المهام (Task Group ID):</label>
+                    <input type="number" name="taskGroupId" placeholder="اكتب رقم الروم مباشرة..." required>
                     
-                    <label>عضوية روم الايداع (Deposit Group ID):</label>
-                    <input type="number" name="depositGroupId" placeholder="  " required>
+                    <label>رقم روم الإيداع / التحالف (Deposit Group ID):</label>
+                    <input type="number" name="depositGroupId" placeholder="اكتب رقم الروم مباشرة..." required>
                     
-                    <label>الاسم :</label>
-                    <input type="text" name="keyword1" placeholder="  ">
+                    <label>الاسم الأول أو الكلمة المفتاحية 1:</label>
+                    <input type="text" name="keyword1" placeholder="اختياري...">
                     
-                    <label>الاسم الثاني :</label>
-                    <input type="text" name="keyword2" placeholder="  ">
+                    <label>الاسم الثاني أو الكلمة المفتاحية 2:</label>
+                    <input type="text" name="keyword2" placeholder="اختياري...">
                     
-                    <button type="submit" class="btn-start">تشغيل الحساب الآن 🚀</button>
+                    <button type="submit" class="btn-start">تشغيل الحساب الفردي الآن 🚀</button>
                 </form>
             </div>
             <div class="card">
@@ -88,14 +88,17 @@ app.get('/', (req, res) => {
                             body: JSON.stringify({ email })
                         });
                         const data = await response.json();
-                        if(data.active) {
+                        if(data.status === 'online') {
                             resultDiv.className = "online";
-                            resultDiv.innerHTML = "البوت شغال حالياً ✅<br><small>مراقبة أسماء: " + data.keywords.join(' و ') + "</small>";
+                            resultDiv.innerHTML = "البوت شغال ومتصل حالياً ✅<br><small>مراقبة: " + data.keywords.join(' - ') + "</small>";
+                        } else if(data.status === 'connecting') {
+                            resultDiv.className = "connecting";
+                            resultDiv.innerHTML = "جاري محاولة تسجيل الدخول والربط بسيرفرات ولف... ⏳";
                         } else {
                             resultDiv.className = "offline";
-                            resultDiv.innerHTML = "الحساب متوقف أو غير متصل ❌";
+                            resultDiv.innerHTML = "الحساب متوقف أو تم رفض الاتصال من ولف (تأكد من الحساب والباسوورد) ❌";
                         }
-                    } catch(e) { resultDiv.innerHTML = "خطأ في الاتصال."; }
+                    } catch(e) { resultDiv.innerHTML = "خطأ في الاتصال بسيرفر الاستضافة."; }
                 }
                 function prepareStop() {
                     const email = document.getElementById('controlEmail').value;
@@ -113,13 +116,12 @@ app.post('/start-bot', async (req, res) => {
     const { email, password, taskGroupId, depositGroupId, keyword1, keyword2 } = req.body;
 
     if (activeBots[email]) {
-        try { activeBots[email].close(); } catch(e){}
+        try { activeBots[email].customCleanup(); } catch(e){}
     }
 
     const tGroupId = parseInt(taskGroupId);
     const dGroupId = parseInt(depositGroupId);
     
-    // تجميع الكلمات المفتاحية المدخلة من قِبل المستخدم وتجنب المشاكل إن كانت فارغة
     const keywords = [];
     if (keyword1 && keyword1.trim() !== "") keywords.push(keyword1.trim());
     if (keyword2 && keyword2.trim() !== "") keywords.push(keyword2.trim());
@@ -134,7 +136,9 @@ app.post('/start-bot', async (req, res) => {
     let boxIntervalId = null;
     let messageIdCounter = 1;
 
+    // الاتصال بسيرفر الاتصال المباشر لـ ولف
     const ws = new WebSocket('wss://v3.palringo.com:9005');
+    ws.botStatus = 'connecting'; // الحالة الافتراضية
 
     const sendJson = (name, body) => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -147,11 +151,11 @@ app.post('/start-bot', async (req, res) => {
     };
 
     const sendRoutineCommands = () => {
-        if (isPaused) return;
+        if (isPaused || ws.botStatus !== 'online') return;
         lastRoutineCommandTime = Date.now();
         sendGroupMessage(tGroupId, "!مد مهام");
         setTimeout(() => {
-            if (!isPaused) {
+            if (!isPaused && ws.botStatus === 'online') {
                 lastRoutineCommandTime = Date.now();
                 sendGroupMessage(dGroupId, "!مد تحالف ايداع كل");
             }
@@ -159,28 +163,44 @@ app.post('/start-bot', async (req, res) => {
     };
 
     ws.on('open', () => {
-        sendJson('security login', { loginType: 'email', identity: email, password: password });
+        // حزمة الدخول الرسمية لولف
+        sendJson('security login', { 
+            loginType: 'email', 
+            identity: email, 
+            password: password,
+            onlineStatus: 1 
+        });
     });
 
     ws.on('message', (data) => {
         try {
             const response = JSON.parse(data.toString());
+            console.log("ولد رد من سيرفر ولف:", response.name, "الكود:", response.code);
             
-            if (response.name === 'security login response' && response.code === 200) {
-                sendJson('group subscribe', { id: tGroupId });
-                sendJson('group subscribe', { id: dGroupId });
-                
-                sendRoutineCommands();
-                routineIntervalId = setInterval(sendRoutineCommands, 63000);
-                boxIntervalId = setInterval(() => {
-                    if (canOpenBoxes && !isPaused) {
-                        lastBoxCommandTime = Date.now();
-                        sendGroupMessage(tGroupId, "!مد صندوق فتح ");
-                    }
-                }, 180000);
+            if (response.name === 'security login response') {
+                if (response.code === 200) {
+                    ws.botStatus = 'online'; // نجح الدخول
+                    
+                    sendJson('group subscribe', { id: tGroupId });
+                    sendJson('group subscribe', { id: dGroupId });
+                    
+                    setTimeout(() => {
+                        sendRoutineCommands();
+                        routineIntervalId = setInterval(sendRoutineCommands, 63000);
+                        boxIntervalId = setInterval(() => {
+                            if (canOpenBoxes && !isPaused && ws.botStatus === 'online') {
+                                lastBoxCommandTime = Date.now();
+                                sendGroupMessage(tGroupId, "!مد صندوق فتح ");
+                            }
+                        }, 180000);
+                    }, 2000);
+                } else {
+                    ws.botStatus = 'failed'; // الحساب أو الباسوورد خطأ أو محظور
+                    ws.close();
+                }
             }
 
-            if (response.name === 'message notify') {
+            if (response.name === 'message notify' && ws.botStatus === 'online') {
                 const msg = response.body;
                 const isTargetGroup = msg.targetGroupId === tGroupId || msg.targetGroupId === dGroupId;
                 if (!isTargetGroup || msg.mimeType !== 'text/plain') return;
@@ -214,7 +234,7 @@ app.post('/start-bot', async (req, res) => {
                     }
 
                     let answer = null;
-                    if (content.includes('عضوية')) answer = String(FIXED_OWNER_ID); // إرسال العضوية الثابتة تلقائياً هنا
+                    if (content.includes('عضوية')) answer = String(FIXED_OWNER_ID);
                     else if (content.includes('بالكلمات') || content.includes('بالحروف')) {
                         const match = content.match(/\d+/);
                         if (match && numToWord[match[0]]) answer = numToWord[match[0]];
@@ -255,8 +275,13 @@ app.post('/start-bot', async (req, res) => {
         } catch (e) {}
     });
 
+    ws.on('close', () => {
+        if(ws.botStatus !== 'failed') ws.botStatus = 'offline';
+    });
+
     ws.savedKeywords = keywords.length > 0 ? keywords : ["تلقائي / الكل"];
     ws.customCleanup = () => {
+        ws.botStatus = 'offline';
         if (routineIntervalId) clearInterval(routineIntervalId);
         if (boxIntervalId) clearInterval(boxIntervalId);
         try { ws.close(); } catch(e){}
@@ -266,8 +291,8 @@ app.post('/start-bot', async (req, res) => {
 
     res.send(`
         <div style="text-align:center; font-family:sans-serif; margin-top:50px; direction:rtl;">
-            <h2 style="color: #28a745;">تم تفعيل اتصال البوت المستقل بنجاح! 🎉</h2>
-            <p>الحساب يراقب الآن الأسماء: (${ws.savedKeywords.join(' - ')})</p>
+            <h2 style="color: #f39c12;">جاري إرسال طلب الاتصال بسيرفرات ولف... ⏳</h2>
+            <p>اضغط على العودة ثم قُم بعمل "فحص الحالة المباشرة" بعد 10 ثوانٍ للتأكد من نجاح الدخول الحَيّ!</p>
             <a href="/" style="padding:10px 20px; background:#007bff; color:white; text-decoration:none; border-radius:5px;">العودة للوحة التحكم</a>
         </div>
     `);
@@ -291,12 +316,12 @@ app.post('/stop-bot', (req, res) => {
 
 app.post('/api/status', (req, res) => {
     const { email } = req.body;
-    if (activeBots[email] && activeBots[email].readyState === WebSocket.OPEN) {
-        res.json({ active: true, keywords: activeBots[email].savedKeywords });
+    if (activeBots[email]) {
+        res.json({ status: activeBots[email].botStatus, keywords: activeBots[email].savedKeywords });
     } else {
-        res.json({ active: false });
+        res.json({ status: 'offline' });
     }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 السيرفر المستقل يعمل على منفذ ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 السيرفر المحدث يعمل على منفذ ${PORT}`));
