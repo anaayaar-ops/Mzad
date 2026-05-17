@@ -93,10 +93,10 @@ app.get('/', (req, res) => {
                             resultDiv.innerHTML = "البوت شغال ومتصل حالياً ✅<br><small>مراقبة: " + data.keywords.join(' - ') + "</small>";
                         } else if(data.status === 'connecting') {
                             resultDiv.className = "connecting";
-                            resultDiv.innerHTML = "جاري محاولة تسجيل الدخول والربط بسيرفرات ولف... ⏳";
+                            resultDiv.innerHTML = "جاري محاولة تسجيل الدخول والربط بسيرفرات ولف... ⏳<br><small>الحالة الحالية: " + (data.details || "في انتظار الرد") + "</small>";
                         } else {
                             resultDiv.className = "offline";
-                            resultDiv.innerHTML = "الحساب متوقف أو تم رفض الاتصال من ولف (تأكد من الحساب والباسوورد) ❌";
+                            resultDiv.innerHTML = "الحساب متوقف أو تم رفض الاتصال. السبب: [" + (data.details || "غير معروف") + "] ❌";
                         }
                     } catch(e) { resultDiv.innerHTML = "خطأ في الاتصال بسيرفر الاستضافة."; }
                 }
@@ -136,9 +136,10 @@ app.post('/start-bot', async (req, res) => {
     let boxIntervalId = null;
     let messageIdCounter = 1;
 
-    // الاتصال بسيرفر الاتصال المباشر لـ ولف
+    // فتح الاتصال المباشر
     const ws = new WebSocket('wss://v3.palringo.com:9005');
-    ws.botStatus = 'connecting'; // الحالة الافتراضية
+    ws.botStatus = 'connecting';
+    ws.statusDetails = 'تم فتح السوكيت، جاري إرسال حزمة الدخول...';
 
     const sendJson = (name, body) => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -163,29 +164,36 @@ app.post('/start-bot', async (req, res) => {
     };
 
     ws.on('open', () => {
-        // حزمة الدخول الرسمية لولف
+        console.log(`[${email}] متصل الآن بالـ WebSocket. جاري تسجيل الدخول...`);
+        // إرسال الحزمة الكاملة والمحدثة لمحاكاة التطبيق الرسمي لمنع الرفض الصامت
         sendJson('security login', { 
             loginType: 'email', 
             identity: email, 
             password: password,
-            onlineStatus: 1 
+            onlineStatus: 1,
+            capabilities: 65535 // إعلام السيرفر بقدرات كاملة للمستقبل
         });
     });
 
     ws.on('message', (data) => {
         try {
             const response = JSON.parse(data.toString());
-            console.log("ولد رد من سيرفر ولف:", response.name, "الكود:", response.code);
+            console.log(`[${email}] رد السيرفر -> Name: ${response.name}, Code: ${response.code}`);
             
             if (response.name === 'security login response') {
                 if (response.code === 200) {
-                    ws.botStatus = 'online'; // نجح الدخول
+                    ws.botStatus = 'online';
+                    ws.statusDetails = 'متصل بنجاح وجاري إرسال الأوامر';
+                    console.log(`[${email}] تم تسجيل الدخول بنجاح! جاري الاشتراك في الرومات...`);
                     
                     sendJson('group subscribe', { id: tGroupId });
                     sendJson('group subscribe', { id: dGroupId });
                     
                     setTimeout(() => {
                         sendRoutineCommands();
+                        if (routineIntervalId) clearInterval(routineIntervalId);
+                        if (boxIntervalId) clearInterval(boxIntervalId);
+                        
                         routineIntervalId = setInterval(sendRoutineCommands, 63000);
                         boxIntervalId = setInterval(() => {
                             if (canOpenBoxes && !isPaused && ws.botStatus === 'online') {
@@ -195,7 +203,9 @@ app.post('/start-bot', async (req, res) => {
                         }, 180000);
                     }, 2000);
                 } else {
-                    ws.botStatus = 'failed'; // الحساب أو الباسوورد خطأ أو محظور
+                    ws.botStatus = 'failed';
+                    ws.statusDetails = `رفض الدخول من ولف بكود خطأ: ${response.code}`;
+                    console.error(`[${email}] فشل الدخول. الكود من ولف: ${response.code}`);
                     ws.close();
                 }
             }
@@ -272,11 +282,22 @@ app.post('/start-bot', async (req, res) => {
                     }
                 }
             }
-        } catch (e) {}
+        } catch (e) {
+            console.error("خطأ أثناء معالجة الرسالة القادمة:", e);
+        }
     });
 
-    ws.on('close', () => {
-        if(ws.botStatus !== 'failed') ws.botStatus = 'offline';
+    ws.on('close', (code, reason) => {
+        console.log(`[${email}] أغلق الاتصال. الكود: ${code}, السبب: ${reason}`);
+        if(ws.botStatus !== 'failed') {
+            ws.botStatus = 'offline';
+            ws.statusDetails = `تم الفصل من السيرفر. كود: ${code}`;
+        }
+    });
+
+    ws.on('error', (err) => {
+        console.error(`[${email}] حدث خطأ في الاتصال:`, err);
+        ws.statusDetails = `خطأ اتصال: ${err.message}`;
     });
 
     ws.savedKeywords = keywords.length > 0 ? keywords : ["تلقائي / الكل"];
@@ -291,8 +312,8 @@ app.post('/start-bot', async (req, res) => {
 
     res.send(`
         <div style="text-align:center; font-family:sans-serif; margin-top:50px; direction:rtl;">
-            <h2 style="color: #f39c12;">جاري إرسال طلب الاتصال بسيرفرات ولف... ⏳</h2>
-            <p>اضغط على العودة ثم قُم بعمل "فحص الحالة المباشرة" بعد 10 ثوانٍ للتأكد من نجاح الدخول الحَيّ!</p>
+            <h2 style="color: #f39c12;">جاري الربط مع خوادم ولف... ⏳</h2>
+            <p>ارجع للوحة واضغط على زر الفحص لمعاينة الرد المباشر.</p>
             <a href="/" style="padding:10px 20px; background:#007bff; color:white; text-decoration:none; border-radius:5px;">العودة للوحة التحكم</a>
         </div>
     `);
@@ -317,9 +338,13 @@ app.post('/stop-bot', (req, res) => {
 app.post('/api/status', (req, res) => {
     const { email } = req.body;
     if (activeBots[email]) {
-        res.json({ status: activeBots[email].botStatus, keywords: activeBots[email].savedKeywords });
+        res.json({ 
+            status: activeBots[email].botStatus, 
+            details: activeBots[email].statusDetails,
+            keywords: activeBots[email].savedKeywords 
+        });
     } else {
-        res.json({ status: 'offline' });
+        res.json({ status: 'offline', details: 'لا يوجد اتصال مسجل لهذا الإيميل' });
     }
 });
 
